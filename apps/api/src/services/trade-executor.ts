@@ -1,0 +1,339 @@
+import {
+  MantleDataClient,
+  type Chain,
+  type EvmChain,
+  getAmountOut,
+  createEvmTx,
+} from '@jakartagents/mantle-data';
+import { encodeFunctionData, parseUnits, maxUint256 } from 'viem';
+import { ALL_TOKEN_ADDRESSES, getTokenDecimals } from '@jakartagents/shared';
+import { sendTransactionFromServerWallet } from '../lib/thirdweb-wallet.js';
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+const DEFAULT_SLIPPAGE_BPS = '100'; // 1%
+const DEFAULT_SOLANA_FEE = '100000'; // 0.0001 SOL priority fee
+
+const ERC20_ABI = [
+  {
+    name: 'approve',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'allowance',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'spender', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const;
+
+/**
+ * Ensure the DEX router has sufficient ERC20 allowance to spend `tokenAddress`
+ * from `walletAddress`. Sends an approve(spender, maxUint256) tx if needed.
+ */
+async function ensureErc20Allowance(
+  tokenAddress: string,
+  walletAddress: string,
+  spender: string,
+  requiredAmount: bigint,
+): Promise<void> {
+  // Check current allowance via eth_call
+  const allowanceData = encodeFunctionData({
+    abi: ERC20_ABI,
+    functionName: 'allowance',
+    args: [walletAddress as `0x${string}`, spender as `0x${string}`],
+  });
+
+  try {
+    const { createPublicClient, http } = await import('viem');
+    const { MANTLE_CHAIN, mantleRpcUrl } = await import('../lib/chains.js');
+    const publicClient = createPublicClient({ chain: MANTLE_CHAIN, transport: http(mantleRpcUrl()) });
+    const result = await publicClient.readContract({
+      address: tokenAddress as `0x${string}`,
+      abi: ERC20_ABI,
+      functionName: 'allowance',
+      args: [walletAddress as `0x${string}`, spender as `0x${string}`],
+    });
+    if ((result as bigint) >= requiredAmount) {
+      return; // already sufficient
+    }
+  } catch {
+    // If allowance check fails, proceed with approval anyway
+  }
+
+  console.log(`[trade] Approving ${spender} to spend token ${tokenAddress}`);
+  const approveData = encodeFunctionData({
+    abi: ERC20_ABI,
+    functionName: 'approve',
+    args: [spender as `0x${string}`, maxUint256],
+  });
+  await sendTransactionFromServerWallet(walletAddress, {
+    to: tokenAddress,
+    data: approveData,
+  });
+  console.log(`[trade] Approval tx submitted`);
+}
+
+let _aveClient: MantleDataClient | undefined;
+
+function getMantleDataClient(): MantleDataClient {
+  if (!_aveClient) {
+    _aveClient = new MantleDataClient();
+  }
+  return _aveClient;
+}
+
+// ---------------------------------------------------------------------------
+// Types — kept compatible with the original interface
+// ---------------------------------------------------------------------------
+
+export interface TradeResult {
+  txHash: string;
+  amountIn: string;
+  amountOut: string;
+  rate: number;
+}
+
+// ---------------------------------------------------------------------------
+// Main trade functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute a trade via AVE DEX aggregation.
+ *
+ * Uses AVE's multi-chain
+ * DEX routing. The interface stays compatible with agent-cron.ts / fx-strategy.ts.
+ */
+export async function executeTrade(params: {
+  serverWalletId: string;
+  serverWalletAddress: string;
+  currency: string;
+  direction: 'buy' | 'sell';
+  amountUsd: number;
+  chain?: Chain;
+  inTokenAddress?: string;
+  outTokenAddress?: string;
+  slippageBps?: string;
+}): Promise<TradeResult> {
+  const {
+    serverWalletAddress,
+    currency,
+    direction,
+    amountUsd,
+    chain = 'bsc',
+    inTokenAddress,
+    outTokenAddress,
+    slippageBps = DEFAULT_SLIPPAGE_BPS,
+  } = params;
+
+  if (amountUsd == null || typeof amountUsd !== 'number' || amountUsd <= 0) {
+    throw new Error(
+      `Invalid trade amount for ${currency}: amountUsd must be a positive number (got ${String(amountUsd)})`,
+    );
+  }
+
+  if (!inTokenAddress || !outTokenAddress) {
+    throw new Error(
+      `Token addresses required: inTokenAddress and outTokenAddress must be provided for ${currency} ${direction}`,
+    );
+  }
+
+  const client = getMantleDataClient();
+  const swapType = direction === 'buy' ? 'buy' : 'sell';
+  const inAmountRaw = BigInt(Math.floor(amountUsd * 1e18)).toString();
+
+  console.log(
+    `[trade] Executing ${direction} ${currency} on ${chain}: ` +
+      `$${amountUsd}, in=${inTokenAddress}, out=${outTokenAddress}`,
+  );
+
+  // Get quote
+  const quote = await getAmountOut(client, {
+    chain,
+    inAmount: inAmountRaw,
+    inTokenAddress,
+    outTokenAddress,
+    swapType,
+  });
+
+  console.log(
+    `[trade] Quote: estimateOut=${quote.estimateOut}, decimals=${quote.decimals}`,
+  );
+
+  // Build swap calldata via AVE, then submit via Thirdweb (gasless, no private key needed)
+  const evmChain = chain as EvmChain;
+  const created = await createEvmTx(client, {
+    chain: evmChain,
+    creatorAddress: serverWalletAddress,
+    inAmount: inAmountRaw,
+    inTokenAddress,
+    outTokenAddress,
+    swapType,
+    slippage: slippageBps,
+  });
+
+  const { data, to, value } = created.txContent;
+  console.log(`[trade] AVE tx built: to=${to}, requestTxId=${created.requestTxId}`);
+
+  // Approve DEX router to spend inToken if needed (ERC20 allowance)
+  await ensureErc20Allowance(inTokenAddress, serverWalletAddress, to, BigInt(inAmountRaw));
+
+  // Submit via Thirdweb sponsored transaction (gasless via EIP-4337 paymaster)
+  const txHash = await sendTransactionFromServerWallet(serverWalletAddress, {
+    to,
+    data,
+    value: BigInt(value || '0'),
+  });
+
+  const estimateOutNum = Number(quote.estimateOut) || 0;
+  const inAmountNum = Number(inAmountRaw) || 0;
+  const rate = inAmountNum > 0 ? estimateOutNum / inAmountNum : 0;
+
+  console.log(`[trade] Success: txHash=${txHash}`);
+
+  return {
+    txHash,
+    amountIn: inAmountRaw,
+    amountOut: quote.estimateOut,
+    rate,
+  };
+}
+
+/**
+ * Execute a manual swap for an arbitrary token pair.
+ * Execute a swap via AVE DEX aggregation.
+ */
+export async function executeSwap(params: {
+  serverWalletId: string;
+  serverWalletAddress: string;
+  from: string;
+  to: string;
+  amount: string;
+  slippagePct?: number;
+  chain?: Chain;
+  inTokenAddress?: string;
+  outTokenAddress?: string;
+}): Promise<TradeResult> {
+  const {
+    serverWalletAddress,
+    from,
+    to,
+    amount,
+    slippagePct = 1,
+    chain = 'bsc',
+    inTokenAddress,
+    outTokenAddress,
+  } = params;
+
+  if (!inTokenAddress || !outTokenAddress) {
+    throw new Error(
+      `Token addresses required: inTokenAddress and outTokenAddress must be provided for ${from} → ${to}`,
+    );
+  }
+
+  const client = getMantleDataClient();
+  const evmChain = chain as EvmChain;
+  const slippageBps = String(Math.round(slippagePct * 100));
+
+  console.log(`[trade] Swap ${amount} ${from} → ${to} on ${chain}`);
+
+  // Get quote
+  const quote = await getAmountOut(client, {
+    chain,
+    inAmount: amount,
+    inTokenAddress,
+    outTokenAddress,
+    swapType: 'buy',
+  });
+
+  // Build calldata via AVE, submit via Thirdweb (gasless)
+  const created = await createEvmTx(client, {
+    chain: evmChain,
+    creatorAddress: serverWalletAddress,
+    inAmount: amount,
+    inTokenAddress,
+    outTokenAddress,
+    swapType: 'buy',
+    slippage: slippageBps,
+  });
+
+  // Approve DEX router to spend inToken if needed
+  await ensureErc20Allowance(inTokenAddress, serverWalletAddress, created.txContent.to, BigInt(amount));
+
+  const txHash = await sendTransactionFromServerWallet(serverWalletAddress, {
+    to: created.txContent.to,
+    data: created.txContent.data,
+    value: BigInt(created.txContent.value || '0'),
+  });
+
+  const estimateOutNum = Number(quote.estimateOut) || 0;
+  const inAmountNum = Number(amount) || 0;
+  const rate = inAmountNum > 0 ? estimateOutNum / inAmountNum : 0;
+
+  return {
+    txHash,
+    amountIn: amount,
+    amountOut: quote.estimateOut,
+    rate,
+  };
+}
+
+const ERC20_TRANSFER_ABI = [
+  {
+    name: 'transfer',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+] as const;
+
+/**
+ * Send ERC20 tokens from the agent's server wallet to a recipient.
+ */
+export async function sendTokens(params: {
+  serverWalletId: string;
+  serverWalletAddress: string;
+  token: string;
+  amount: string;
+  recipient: string;
+  chain?: Chain;
+}): Promise<{ txHash: string }> {
+  const { serverWalletAddress, token, amount, recipient } = params;
+
+  const tokenAddress = ALL_TOKEN_ADDRESSES[token];
+  if (!tokenAddress) {
+    throw new Error(`Unknown token: ${token}`);
+  }
+
+  const decimals = getTokenDecimals(token);
+  const amountUnits = parseUnits(amount, decimals);
+
+  const data = encodeFunctionData({
+    abi: ERC20_TRANSFER_ABI,
+    functionName: 'transfer',
+    args: [recipient as `0x${string}`, amountUnits],
+  });
+
+  const txHash = await sendTransactionFromServerWallet(serverWalletAddress, {
+    to: tokenAddress as `0x${string}`,
+    data,
+  });
+
+  return { txHash };
+}

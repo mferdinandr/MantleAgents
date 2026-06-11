@@ -1,0 +1,11 @@
+/examples
+.DS_Store
+node_modules/
+dist/
+.next/
+.env
+.env.local
+.env*.local
+*.tsbuildinfo
+.turbo/
+pnpm-lock.yaml

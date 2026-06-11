@@ -1,0 +1,20 @@
+{
+  "name": "@jakartagents/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy:tokens": "tsx scripts/deploy-mock-tokens.ts",
+    "deploy:attestation-registry": "tsx scripts/deploy-attestation-registry.ts",
+    "verify:registries": "tsx scripts/verify-registries.ts"
+  },
+  "dependencies": {
+    "viem": "2.39.0"
+  },
+  "devDependencies": {
+    "solc": "^0.8.28",
+    "tsx": "^4.x",
+    "@types/node": "^20.x",
+    "dotenv": "^16.x"
+  }
+}
