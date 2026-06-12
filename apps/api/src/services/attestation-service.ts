@@ -364,7 +364,7 @@ export async function createAndAttachRunAttestation(params: {
   agentType: AgentType;
   runId: string;
   agentId: bigint;
-}): Promise<{ attestationId: string } | null> {
+}): Promise<{ attestationId: string; commitTxHash: string | null } | null> {
   const { walletAddress, agentType, runId, agentId } = params;
   const tableName = getTimelineTable(agentType);
 
@@ -467,7 +467,10 @@ export async function createAndAttachRunAttestation(params: {
     throw new Error(`Failed to attach attestation to timeline rows: ${updateError.message}`);
   }
 
-  return { attestationId: attestation.id };
+  return {
+    attestationId: attestation.id,
+    commitTxHash,
+  };
 }
 
 export async function listAttestations(params: {

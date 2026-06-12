@@ -264,7 +264,7 @@ describe('createAndAttachRunAttestation', () => {
         runId: 'run-2',
         agentId: 42n,
       }),
-    ).resolves.toEqual({ attestationId: 'att-2' });
+    ).resolves.toEqual({ attestationId: 'att-2', commitTxHash: '0xabc' });
 
     const inserted = findInsertPayload('agent_attestations');
     const payload = inserted?.payload as Record<string, unknown>;
