@@ -1,6 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware } from '../middleware/auth.js';
 import { createSupabaseAdmin, type Database } from '@jakartagents/db';
+import { formatEther } from 'viem';
+import { MANTLE_NETWORK } from '../lib/chains.js';
+import { publicClient } from '../lib/chain-client.js';
 import { computeRiskScore, scoreToProfile } from '../lib/risk-scoring.js';
 import { createServerWallet } from '../lib/thirdweb-wallet.js';
 import { DEFAULT_GUARDRAILS, type RiskAnswers, type RiskProfile } from '@jakartagents/shared';
@@ -11,6 +14,21 @@ const supabaseAdmin = createSupabaseAdmin(
 );
 
 export async function userRoutes(app: FastifyInstance) {
+  app.get(
+    '/api/user/balance',
+    { preHandler: authMiddleware },
+    async (request) => {
+      const walletAddress = request.user!.walletAddress as `0x${string}`;
+      const balance = await publicClient.getBalance({ address: walletAddress });
+
+      return {
+        balance: formatEther(balance),
+        hasFunds: balance > 0n,
+        faucetUrl: MANTLE_NETWORK === 'testnet' ? 'https://faucet.sepolia.mantle.xyz' : null,
+      };
+    },
+  );
+
   // Submit risk profile answers
   app.post(
     '/api/user/risk-profile',
