@@ -58,6 +58,8 @@ export type FailureCategory =
   | 'slippage_exceeded'
   | 'risk_flagged'
   | 'insufficient_funds'
+  | 'pending_confirmation'
+  | 'skipped'
   | 'other';
 
 export interface AgentConfig {

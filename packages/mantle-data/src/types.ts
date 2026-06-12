@@ -13,7 +13,8 @@ export type Chain =
   | 'optimism'
   | 'avax'
   | 'polygon'
-  | 'ton';
+  | 'ton'
+  | 'mantle';
 
 export type EvmChain = 'bsc' | 'eth' | 'base';
 

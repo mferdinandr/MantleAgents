@@ -539,13 +539,20 @@ export async function runAgentCycle(config: AgentConfigRow): Promise<void> {
           emitProgress(walletAddress, executeStep,
             `Failed ${currentAction} ${currentLabel}: ${failureMessage}`,
           );
-          await logTimeline(walletAddress, 'trade_failed', {
-            summary: `Execution failed for ${currentLabel}: ${formatExecutionError(failureMessage)}`,
+
+          const failureCat = result.failureCategory ?? 'other';
+          const failureEventType =
+            failureCat === 'pending_confirmation' ? 'trade_pending' :
+            failureCat === 'skipped' ? 'trade_skipped' :
+            'trade_failed';
+
+          await logTimeline(walletAddress, failureEventType, {
+            summary: `Execution ${failureEventType.replace('trade_', '')} for ${currentLabel}: ${formatExecutionError(failureMessage)}`,
             detail: {
               signal: signalToExecute,
               originalSignal: signal,
               error: failureMessage,
-              failureCategory: result.failureCategory ?? 'other',
+              failureCategory: failureCat,
               adaptationCount,
             },
             amountUsd: result.amountUsd,

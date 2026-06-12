@@ -5,6 +5,7 @@ import {
   getAmountOut,
   createEvmTx,
 } from '@jakartagents/mantle-data';
+import { executeRealClawSwap, isRealClawConfigured } from './realclaw-executor.js';
 import { encodeFunctionData, parseUnits, maxUint256 } from 'viem';
 import {
   ALL_TOKEN_ADDRESSES,
@@ -143,14 +144,86 @@ function toFailureResult(error: unknown): Extract<TradeResult, { success: false 
 }
 
 // ---------------------------------------------------------------------------
+// Mantle / RealClaw trade path
+// ---------------------------------------------------------------------------
+
+type MantelTradeParams = {
+  serverWalletAddress: string;
+  currency?: string;
+  direction?: string;
+  amountUsd?: number;
+  inTokenAddress?: string;
+  outTokenAddress?: string;
+  slippageBps?: string;
+};
+
+async function executeMantle(params: MantelTradeParams): Promise<TradeResult> {
+  if (!isRealClawConfigured()) {
+    return {
+      success: false,
+      failureCategory: 'skipped',
+      reason: 'RealClaw not configured',
+    };
+  }
+
+  const { serverWalletAddress, inTokenAddress, outTokenAddress, amountUsd, slippageBps } = params;
+
+  if (!inTokenAddress || !outTokenAddress) {
+    return {
+      success: false,
+      failureCategory: 'other',
+      reason: 'Token addresses required for Mantle trade',
+    };
+  }
+
+  const inAmountRaw = BigInt(Math.floor((amountUsd ?? 0) * 1e18)).toString();
+  const slippageBpsNum = slippageBps != null ? parseInt(slippageBps, 10) : 100;
+
+  console.log(
+    `[realclaw] Executing swap on Mantle: ${inTokenAddress} → ${outTokenAddress}, amount=${inAmountRaw}`,
+  );
+
+  const result = await executeRealClawSwap({
+    walletAddress: serverWalletAddress,
+    tokenIn: inTokenAddress as `0x${string}`,
+    tokenOut: outTokenAddress as `0x${string}`,
+    amountIn: inAmountRaw,
+    slippageBps: slippageBpsNum,
+  });
+
+  if (result.status === 'success') {
+    console.log(`[realclaw] Success: txHash=${result.txHash}`);
+    return {
+      success: true,
+      txHash: result.txHash,
+      amountIn: inAmountRaw,
+      amountOut: result.amountOut,
+      rate: 0,
+    };
+  }
+
+  if (result.status === 'pending_confirmation') {
+    return {
+      success: false,
+      failureCategory: 'pending_confirmation',
+      reason: `pending_confirmation: ${result.reason}`,
+    };
+  }
+
+  return {
+    success: false,
+    failureCategory: mapFailureCategory(result.reason),
+    reason: result.reason,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main trade functions
 // ---------------------------------------------------------------------------
 
 /**
- * Execute a trade via AVE DEX aggregation.
- *
- * Uses AVE's multi-chain
- * DEX routing. The interface stays compatible with agent-cron.ts / fx-strategy.ts.
+ * Execute a trade. Mantle trades route to RealClaw when configured; all other
+ * chains use the AVE DEX aggregation path.
  */
 export async function executeTrade(params: {
   serverWalletId: string;
@@ -163,13 +236,18 @@ export async function executeTrade(params: {
   outTokenAddress?: string;
   slippageBps?: string;
 }): Promise<TradeResult> {
+  const chain = params.chain ?? 'bsc';
+
+  if (chain === 'mantle') {
+    return executeMantle(params);
+  }
+
   try {
     const {
       serverWalletAddress,
       currency,
       direction,
       amountUsd,
-      chain = 'bsc',
       inTokenAddress,
       outTokenAddress,
       slippageBps = DEFAULT_SLIPPAGE_BPS,
@@ -250,7 +328,7 @@ export async function executeTrade(params: {
 
 /**
  * Execute a manual swap for an arbitrary token pair.
- * Execute a swap via AVE DEX aggregation.
+ * Mantle swaps route to RealClaw; other chains use AVE DEX aggregation.
  */
 export async function executeSwap(params: {
   serverWalletId: string;
@@ -263,6 +341,17 @@ export async function executeSwap(params: {
   inTokenAddress?: string;
   outTokenAddress?: string;
 }): Promise<TradeResult> {
+  if ((params.chain ?? 'bsc') === 'mantle') {
+    return executeMantle({
+      serverWalletAddress: params.serverWalletAddress,
+      currency: params.from,
+      direction: 'buy',
+      inTokenAddress: params.inTokenAddress,
+      outTokenAddress: params.outTokenAddress,
+      slippageBps: params.slippagePct != null ? String(Math.round(params.slippagePct * 100)) : undefined,
+    });
+  }
+
   try {
     const {
       serverWalletAddress,
