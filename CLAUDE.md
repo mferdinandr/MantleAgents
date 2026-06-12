@@ -71,7 +71,7 @@ Per-run timeline events are canonicalized + hashed (`eventsHash`), HMAC-signed (
 
 ### Mantle Execution (`apps/api/src/services/realclaw-executor.ts`)
 
-Mantle execution routes through **RealClaw / Byreal Skills CLI**, the agent layer that dispatches swaps to Merchant Moe / Agni Finance / Fluxion — non-custodial via Privy. `executeRealClawSwap()` is the entry point; `isRealClawConfigured()` gates whether this path is active. **Status: scaffolded, pending confirmation of the live API schema** at openclaw.mantle.xyz before wiring into `trade-executor.ts`.
+Mantle execution routes through **RealClaw / Byreal Skills CLI**, the agent layer that dispatches swaps to Merchant Moe / Agni Finance / Fluxion — non-custodial via Privy. `executeRealClawSwap()` calls `POST /api/skills/dex-swap` with Bearer token auth (see `docs/REALCLAW_API.md`); includes `pending_confirmation` polling (2s interval, 20s default timeout) and 5xx retry (up to 3×). `isRealClawConfigured()` validates both `REALCLAW_API_KEY` and `REALCLAW_API_BASE` at startup. `trade-executor.ts` routes Mantle trades to RealClaw when configured; emits `trade_skipped` when not configured.
 
 ### Agent Execution Loop (`apps/api/src/services/agent-cron.ts`)
 

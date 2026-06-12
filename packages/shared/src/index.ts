@@ -6,3 +6,5 @@ export * from './types/transaction.js';
 export * from './types/sip.js';
 export * from './types/yield.js';
 export * from './types/n8n.js';
+export * from './types/workflow.js';
+export * from './types/strategy.js';

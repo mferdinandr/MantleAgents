@@ -14,9 +14,12 @@ import { conversationRoutes } from './routes/conversation.js';
 import { selfclawRoutes } from './routes/selfclaw.js';
 import { monitorRoutes } from './routes/monitor.js';
 import { n8nBridgeRoutes } from './routes/n8n-bridge.js';
+import { workflowGeneratorRoutes } from './routes/workflow-generator.js';
+import { marketplaceRoutes } from './routes/marketplace.js';
 import { systemRoutes } from './routes/system.js';
 import { startPriceSnapshotCron } from './services/snapshot-cron.js';
 import { startAgentCron } from './services/agent-cron.js';
+import { isRealClawConfigured } from './services/realclaw-executor.js';
 import { startMonitorCron } from './services/token-monitor.js';
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -104,6 +107,8 @@ await app.register(conversationRoutes);
 await app.register(selfclawRoutes);
 await app.register(monitorRoutes);
 await app.register(n8nBridgeRoutes, { prefix: '/api/n8n' });
+await app.register(workflowGeneratorRoutes);
+await app.register(marketplaceRoutes, { prefix: '/api' });
 
 try {
   await app.listen({ port: PORT, host: '0.0.0.0' });
@@ -111,6 +116,9 @@ try {
   startPriceSnapshotCron();
   startAgentCron();
   startMonitorCron();
+  if (isRealClawConfigured()) {
+    console.log('[realclaw] RealClaw execution active — Mantle trades will route to RealClaw');
+  }
 } catch (err) {
   app.log.error(err);
   process.exit(1);

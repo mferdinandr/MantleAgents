@@ -15,6 +15,8 @@ import {
   Wallet,
   Menu,
   X,
+  GitBranch,
+  Store,
 } from 'lucide-react';
 import { usePortfolio } from '@/hooks/use-portfolio';
 import { useYieldPositions } from '@/hooks/use-yield-agent';
@@ -32,6 +34,8 @@ const navItems = [
   { title: 'Yield Agent', url: '/yield-agent', icon: Sprout },
   { title: 'Monitor', url: '/monitor', icon: Eye },
   { title: 'Swap', url: '/swap', icon: ArrowLeftRight },
+  { title: 'Orchestration', url: '/orchestration', icon: GitBranch },
+  { title: 'Marketplace', url: '/marketplace', icon: Store },
 ];
 
 const isLpToken = (symbol: string) => /VAULT|LP|UNIV3/i.test(symbol);

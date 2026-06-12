@@ -32,7 +32,7 @@ Contract sources, deploy scripts, and verification: [`packages/contracts`](./pac
 
 - **Agent identity (ERC-8004)** — every FX/Yield agent registers on-chain via `IdentityRegistry.register()`, minting an agent NFT and linking the agent's execution wallet (`apps/api/src/services/agent-registry.ts`).
 - **Reputation** — trade outcomes are submitted to `ReputationRegistry.giveFeedback()`, building an on-chain track record per agent.
-- **On-chain attestations** — each agent run's timeline (signals, trades, tx hashes) is hashed and committed to `AgentAttestationRegistry` (`apps/api/src/services/attestation-service.ts`), giving every run a permanent, queryable on-chain anchor.
+- **On-chain attestations** — each agent run commits two hashes to `AgentAttestationRegistry`: `eventsHash` (SHA-256 of the full timeline) and `decisionHash` (SHA-256 of the LLM signal + guardrail params + market snapshot that drove the decision). Both are stored in Supabase and anchored on-chain via `commitAttestation()`, with the resulting `commitTxHash` surfaced in the dashboard's "Verified on-chain" badge. See `apps/api/src/services/attestation-service.ts`.
 - **Mantle-native execution (in progress)** — Mantle swaps are routed through **RealClaw / Byreal Skills CLI**, the agent layer that sits in front of Merchant Moe / Agni Finance / Fluxion. The integration is scaffolded in `apps/api/src/services/realclaw-executor.ts`. Non-Mantle chains continue to use the existing market-data/execution SDK described below.
 
 ### Custody Model
@@ -189,6 +189,14 @@ pnpm --filter @jakartagents/contracts verify:registries             # sanity-che
 | `MANTLE_USDC_ADDRESS` / `MANTLE_USDT_ADDRESS` / `MANTLE_WMNT_ADDRESS` | Mock token addresses (testnet) |
 | `EVM_SIGNER_PRIVATE_KEY` | Server signer key for Mantle on-chain registration & transactions |
 | `REALCLAW_API_BASE` / `REALCLAW_API_KEY` | RealClaw / Byreal Skills CLI execution layer for Mantle swaps |
+
+### n8n Orchestration (`apps/api/.env`)
+
+| Variable | Description |
+|---|---|
+| `N8N_BASE_URL` | n8n instance base URL (default: `http://localhost:5678`) |
+| `N8N_API_KEY` | n8n instance API key for workflow provisioning |
+| `N8N_BRIDGE_API_KEY_SECRET` | HMAC secret for per-user bridge API key generation; disables bridge if unset |
 
 ### Core / Auth / Data
 
