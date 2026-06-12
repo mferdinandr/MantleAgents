@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "type-check": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "next lint"
   },
   "dependencies": {
@@ -41,8 +42,12 @@
   "devDependencies": {
     "@jakartagents/typescript-config": "workspace:*",
     "@tailwindcss/postcss": "^4.x",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "jsdom": "^29.1.1",
     "tailwindcss": "^4.x",
     "tw-animate-css": "^1.x",
     "typescript": "^5.x"
