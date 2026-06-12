@@ -33,6 +33,12 @@ export const attestationRegistryAbi = [
       },
       {
         "indexed": false,
+        "internalType": "bytes32",
+        "name": "decisionHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
         "internalType": "uint256",
         "name": "tradeCount",
         "type": "uint256"
@@ -65,6 +71,7 @@ export const attestationRegistryAbi = [
     "name": "attestations",
     "outputs": [
       { "internalType": "bytes32", "name": "eventsHash", "type": "bytes32" },
+      { "internalType": "bytes32", "name": "decisionHash", "type": "bytes32" },
       { "internalType": "uint64", "name": "tradeCount", "type": "uint64" },
       { "internalType": "uint64", "name": "timestamp", "type": "uint64" },
       { "internalType": "bool", "name": "exists", "type": "bool" }
@@ -77,6 +84,7 @@ export const attestationRegistryAbi = [
       { "internalType": "uint256", "name": "agentId", "type": "uint256" },
       { "internalType": "bytes32", "name": "runId", "type": "bytes32" },
       { "internalType": "bytes32", "name": "eventsHash", "type": "bytes32" },
+      { "internalType": "bytes32", "name": "decisionHash", "type": "bytes32" },
       { "internalType": "uint64", "name": "tradeCount", "type": "uint64" }
     ],
     "name": "commitAttestation",
@@ -92,6 +100,7 @@ export const attestationRegistryAbi = [
     "name": "getAttestation",
     "outputs": [
       { "internalType": "bytes32", "name": "eventsHash", "type": "bytes32" },
+      { "internalType": "bytes32", "name": "decisionHash", "type": "bytes32" },
       { "internalType": "uint64", "name": "tradeCount", "type": "uint64" },
       { "internalType": "uint64", "name": "timestamp", "type": "uint64" },
       { "internalType": "bool", "name": "exists", "type": "bool" }

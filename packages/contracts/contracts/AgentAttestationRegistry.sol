@@ -18,6 +18,9 @@ contract AgentAttestationRegistry {
     ///                    events for this run — must match the
     ///                    `eventsHash` field in the off-chain attestation
     ///                    payload so anyone can recompute and verify.
+    /// @param decisionHash sha256 (as bytes32) of the decision input
+    ///                     snapshot `{ signal, guardrailParams,
+    ///                     marketDataSnapshot }` used for this run.
     /// @param tradeCount number of trade-type events in this run
     /// @param timestamp  block timestamp of the commit
     event AttestationCommitted(
@@ -25,12 +28,14 @@ contract AgentAttestationRegistry {
         uint256 indexed agentId,
         bytes32 indexed runId,
         bytes32 eventsHash,
+        bytes32 decisionHash,
         uint256 tradeCount,
         uint256 timestamp
     );
 
     struct Attestation {
         bytes32 eventsHash;
+        bytes32 decisionHash;
         uint64 tradeCount;
         uint64 timestamp;
         bool exists;
@@ -53,6 +58,7 @@ contract AgentAttestationRegistry {
         uint256 agentId,
         bytes32 runId,
         bytes32 eventsHash,
+        bytes32 decisionHash,
         uint64 tradeCount
     ) external {
         Attestation storage existing = attestations[agentId][runId];
@@ -60,6 +66,7 @@ contract AgentAttestationRegistry {
 
         attestations[agentId][runId] = Attestation({
             eventsHash: eventsHash,
+            decisionHash: decisionHash,
             tradeCount: tradeCount,
             timestamp: uint64(block.timestamp),
             exists: true
@@ -71,6 +78,7 @@ contract AgentAttestationRegistry {
             agentId,
             runId,
             eventsHash,
+            decisionHash,
             tradeCount,
             block.timestamp
         );
@@ -79,10 +87,16 @@ contract AgentAttestationRegistry {
     function getAttestation(uint256 agentId, bytes32 runId)
         external
         view
-        returns (bytes32 eventsHash, uint64 tradeCount, uint64 timestamp, bool exists)
+        returns (
+            bytes32 eventsHash,
+            bytes32 decisionHash,
+            uint64 tradeCount,
+            uint64 timestamp,
+            bool exists
+        )
     {
         Attestation storage a = attestations[agentId][runId];
-        return (a.eventsHash, a.tradeCount, a.timestamp, a.exists);
+        return (a.eventsHash, a.decisionHash, a.tradeCount, a.timestamp, a.exists);
     }
 
     function getRunCount(uint256 agentId) external view returns (uint256) {

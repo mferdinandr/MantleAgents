@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Zap,
   Pause,
@@ -23,7 +23,7 @@ import { useAgentStatus, useToggleAgent, useRunNow } from '@/hooks/use-agent';
 import { usePortfolio } from '@/hooks/use-portfolio';
 import { useAgentProgress } from '@/hooks/use-agent-progress';
 import { useSelfClawStatus } from '@/hooks/use-selfclaw';
-import { useFxAttestations } from '@/hooks/use-timeline';
+import { useFxAttestation, useFxAttestations } from '@/hooks/use-timeline';
 import { SelfClawVerificationDialog } from '@/app/(app)/_components/selfclaw-verification-dialog';
 import {
   Dialog,
@@ -32,6 +32,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { AttestationRunDetail } from '@/components/attestation-run-detail';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { formatUsd } from '@/lib/format';
@@ -50,6 +51,10 @@ export function AgentControlCard() {
   const { data: attestationsData } = useFxAttestations(25, 0);
   const [selfclawDialogOpen, setSelfclawDialogOpen] = useState(false);
   const [attestationsOpen, setAttestationsOpen] = useState(false);
+  const [selectedAttestationId, setSelectedAttestationId] = useState<string | null>(null);
+  const { data: selectedAttestation, isLoading: isAttestationLoading } = useFxAttestation(
+    selectedAttestationId ?? '',
+  );
 
   const config = agent?.config;
   const isActive = config?.active ?? false;
@@ -66,6 +71,12 @@ export function AgentControlCard() {
 
   const pnlColor = totalPnl >= 0 ? 'text-green-500' : 'text-red-500';
   const pnlSign = totalPnl >= 0 ? '+' : '';
+
+  useEffect(() => {
+    if (!selectedAttestationId && attestationsData?.entries?.[0]) {
+      setSelectedAttestationId(attestationsData.entries[0].id);
+    }
+  }, [attestationsData?.entries, selectedAttestationId]);
 
   const handleRunNow = () => {
     runNowMutation.mutate(undefined, {
@@ -128,33 +139,17 @@ export function AgentControlCard() {
           <DialogHeader>
             <DialogTitle>Past Attestations</DialogTitle>
             <DialogDescription>
-              TEE attestations for recent FX agent runs.
+              Inspect the decision trail, attestation hashes, and Mantle commit for recent FX runs.
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-[60vh] space-y-2 overflow-auto rounded-md border border-border/60 p-3">
-            {(attestationsData?.entries ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground">No attestations yet.</p>
-            ) : (
-              (attestationsData?.entries ?? []).map((entry) => (
-                <div
-                  key={entry.id}
-                  className="rounded-md border border-border/60 bg-muted/20 p-2 text-xs"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-muted-foreground">
-                      {entry.runId ? `Run ${entry.runId.slice(0, 8)}...` : 'No run id'}
-                    </span>
-                    <span className="rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-emerald-400">
-                      Verified
-                    </span>
-                  </div>
-                  <p className="mt-1 text-muted-foreground">
-                    {new Date(entry.createdAt).toLocaleString()} · {entry.algorithm}
-                  </p>
-                </div>
-              ))
-            )}
-          </div>
+          <AttestationRunDetail
+            agentLabel="FX"
+            entries={attestationsData?.entries ?? []}
+            selectedId={selectedAttestationId}
+            onSelect={setSelectedAttestationId}
+            selectedEntry={selectedAttestation}
+            isLoading={isAttestationLoading}
+          />
         </DialogContent>
       </Dialog>
 

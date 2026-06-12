@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "pnpm exec vitest run --config vitest.config.ts",
     "deploy:tokens": "tsx scripts/deploy-mock-tokens.ts",
     "deploy:attestation-registry": "tsx scripts/deploy-attestation-registry.ts",
     "verify:registries": "tsx scripts/verify-registries.ts"
@@ -15,6 +16,7 @@
     "solc": "^0.8.28",
     "tsx": "^4.x",
     "@types/node": "^20.x",
-    "dotenv": "^16.x"
+    "dotenv": "^16.x",
+    "vitest": "^4.0.18"
   }
 }

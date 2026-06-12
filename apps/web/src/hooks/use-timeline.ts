@@ -26,7 +26,30 @@ interface TimelineResponse {
   hasMore: boolean;
 }
 
-interface AttestationEntry {
+interface AttestationDecisionTrail {
+  signal: {
+    action: string | null;
+    label: string | null;
+    confidence: number | null;
+    reasoning: string | null;
+    raw: Record<string, unknown>;
+  } | null;
+  guardrail: {
+    passed: boolean;
+    summary: string;
+    rule: string | null;
+    raw: Record<string, unknown> | null;
+  } | null;
+  outcome: {
+    status: 'executed' | 'failed' | 'skipped';
+    summary: string;
+    txHash: string | null;
+    amountUsd: number | null;
+    raw: Record<string, unknown> | null;
+  } | null;
+}
+
+export interface AttestationEntry {
   id: string;
   walletAddress: string;
   agentType: 'fx' | 'yield';
@@ -34,6 +57,11 @@ interface AttestationEntry {
   payload: Record<string, unknown>;
   signature: string;
   algorithm: string;
+  eventsHash: string | null;
+  decisionHash: string | null;
+  commitTxHash: string | null;
+  commitTxExplorerUrl: string | null;
+  decisionTrail?: AttestationDecisionTrail | null;
   isDevelopment: boolean;
   createdAt: string;
 }

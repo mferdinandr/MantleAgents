@@ -109,7 +109,9 @@ export function getReputationRegistryAddress(): `0x${string}` {
   return requireTokenAddress('MANTLE_REPUTATION_REGISTRY_ADDRESS', 'ERC-8004 ReputationRegistry');
 }
 
-export function getAttestationRegistryAddress(): `0x${string}` | null {
-  const value = process.env.MANTLE_ATTESTATION_REGISTRY_ADDRESS;
-  return (value as `0x${string}` | undefined) ?? null;
+export function getAttestationRegistryAddress(): `0x${string}` {
+  return requireTokenAddress(
+    'MANTLE_ATTESTATION_REGISTRY_ADDRESS',
+    'AgentAttestationRegistry',
+  );
 }
