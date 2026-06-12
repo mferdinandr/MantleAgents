@@ -1,0 +1,43 @@
+services:
+  api:
+    image: node:20-bookworm-slim
+    working_dir: /workspace
+    command: >
+      sh -lc "corepack enable &&
+      corepack prepare pnpm@9.15.0 --activate &&
+      pnpm install &&
+      pnpm --filter @jakartagents/api dev"
+    ports:
+      - '4000:4000'
+    env_file:
+      - apps/api/.env.example
+    volumes:
+      - .:/workspace
+    networks:
+      - jakartagents
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    ports:
+      - '5678:5678'
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: 'true'
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-password}
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL:-http://localhost:5678}
+      WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678}
+      N8N_HOST: 0.0.0.0
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      API_BASE_URL: ${API_BASE_URL:-http://api:4000}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - jakartagents
+
+volumes:
+  n8n_data:
+
+networks:
+  jakartagents:
+    driver: bridge
