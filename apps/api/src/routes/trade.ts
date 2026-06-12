@@ -273,6 +273,13 @@ export async function tradeRoutes(app: FastifyInstance) {
           slippagePct: slippage,
         });
 
+        if (!result.success) {
+          return reply.status(400).send({
+            error: result.reason,
+            failureCategory: result.failureCategory,
+          });
+        }
+
         const direction = VALID_FROM_TOKENS.has(from) || from === 'USDm' ? 'buy' : 'sell';
         const currency = direction === 'buy' ? to : from;
         const timelineTable = agentType === 'yield' ? 'yield_agent_timeline' : 'fx_agent_timeline';
@@ -296,8 +303,8 @@ export async function tradeRoutes(app: FastifyInstance) {
 
         return {
           txHash: result.txHash,
-          amountIn: result.amountIn.toString(),
-          amountOut: result.amountOut.toString(),
+          amountIn: result.amountIn,
+          amountOut: result.amountOut,
           exchangeRate: result.rate.toFixed(6),
         };
       } catch (err) {

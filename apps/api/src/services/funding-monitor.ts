@@ -90,17 +90,29 @@ export async function checkForDeposits(): Promise<void> {
                 amountUsd: depositFormatted,
               });
 
-              await logTimeline(config.wallet_address, 'funding', {
-                summary: `Auto-converted ${depositFormatted.toFixed(2)} ${token.symbol} → USDm`,
-                detail: {
-                  token: token.symbol,
-                  amount: depositFormatted,
-                  rawAmount: depositAmount.toString(),
+              if (result.success) {
+                await logTimeline(config.wallet_address, 'funding', {
+                  summary: `Auto-converted ${depositFormatted.toFixed(2)} ${token.symbol} → USDm`,
+                  detail: {
+                    token: token.symbol,
+                    amount: depositFormatted,
+                    rawAmount: depositAmount.toString(),
+                    txHash: result.txHash,
+                    rate: result.rate,
+                  },
                   txHash: result.txHash,
-                  rate: result.rate,
-                },
-                txHash: result.txHash,
-              }, undefined, agentType);
+                }, undefined, agentType);
+              } else {
+                await logTimeline(config.wallet_address, 'funding', {
+                  summary: `Auto-conversion of ${depositFormatted.toFixed(2)} ${token.symbol} → USDm failed`,
+                  detail: {
+                    token: token.symbol,
+                    amount: depositFormatted,
+                    error: result.reason,
+                    failureCategory: result.failureCategory,
+                  },
+                }, undefined, agentType);
+              }
             } catch (conversionErr) {
               console.error(
                 `Failed to auto-convert ${token.symbol} to USDm for ${serverAddress}:`,

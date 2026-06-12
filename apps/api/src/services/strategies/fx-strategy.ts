@@ -1,4 +1,4 @@
-import type { GuardrailCheck } from '@jakartagents/shared';
+import type { FailureCategory, GuardrailCheck } from '@jakartagents/shared';
 import { STABLE_TOKENS, DEFAULT_GUARDRAILS, ALL_TOKEN_ADDRESSES, USDT_ADDRESS } from '@jakartagents/shared';
 import { fetchFxNews } from '../news-fetcher.js';
 import { analyzeFxNews } from '../llm-analyzer.js';
@@ -106,6 +106,15 @@ export class FxStrategy implements AgentStrategy {
       inTokenAddress,
       outTokenAddress,
     });
+
+    if (!result.success) {
+      return {
+        success: false,
+        amountUsd: s.amountUsd,
+        error: result.reason,
+        failureCategory: result.failureCategory as FailureCategory,
+      };
+    }
 
     return { success: true, txHash: result.txHash, amountUsd: s.amountUsd };
   }

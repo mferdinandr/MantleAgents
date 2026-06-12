@@ -1,6 +1,14 @@
-import type { Signal, GuardrailCheck } from '@jakartagents/shared';
+import type {
+  AdaptedPlan,
+  FailureCategory,
+  GuardrailCheck,
+  TradeSignal,
+  Signal,
+} from '@jakartagents/shared';
 
-interface AgentConfigForRules {
+const MIN_TRADE_AMOUNT_USD = 0.1;
+
+export interface AgentConfigForRules {
   /** Max trade size as % of available buying power (1-100). Computed maxTradeUsd = availableBuyingPowerUsd * (pct/100). */
   maxTradeSizePct: number;
   maxAllocationPct: number;
@@ -12,10 +20,28 @@ interface AgentConfigForRules {
   availableBuyingPowerUsd?: number;
 }
 
-interface PositionForRules {
+export interface PositionForRules {
   tokenSymbol: string;
   balance: number;
   avgEntryRate: number;
+}
+
+export interface WatchlistCandidate {
+  token_symbol: string;
+  token_address?: string;
+  chain?: string;
+  risk_score?: {
+    risk_level?: string;
+    honeypot?: boolean;
+  } | null;
+}
+
+export interface AdaptedPlanEvaluationContext {
+  positions?: PositionForRules[];
+  portfolioValueUsd?: number;
+  tradesToday?: number;
+  positionPrices?: Record<string, number>;
+  availableBuyingPowerUsd?: number;
 }
 
 /**
@@ -125,6 +151,88 @@ export function checkGuardrails(params: {
   }
 
   return { passed: true };
+}
+
+function passesWatchlistRiskChecks(candidate: WatchlistCandidate): boolean {
+  const riskLevel = candidate.risk_score?.risk_level?.toUpperCase();
+  if (candidate.risk_score?.honeypot) return false;
+  return riskLevel !== 'HIGH' && riskLevel !== 'CRITICAL';
+}
+
+function validateAdaptedSignal(
+  signal: TradeSignal,
+  config: AgentConfigForRules,
+  context: AdaptedPlanEvaluationContext,
+): GuardrailCheck {
+  return checkGuardrails({
+    signal,
+    config,
+    positions: context.positions ?? [],
+    portfolioValueUsd: context.portfolioValueUsd ?? 0,
+    tradesToday: context.tradesToday ?? 0,
+    tradeAmountUsd: signal.amountUsd,
+    positionPrices: context.positionPrices,
+    availableBuyingPowerUsd: context.availableBuyingPowerUsd ?? config.availableBuyingPowerUsd,
+  });
+}
+
+export function evaluateAdaptedPlan(
+  originalSignal: TradeSignal,
+  failureCategory: FailureCategory,
+  config: AgentConfigForRules,
+  watchlistCandidates: WatchlistCandidate[],
+  context: AdaptedPlanEvaluationContext = {},
+): AdaptedPlan | null {
+  if (failureCategory === 'other' || failureCategory === 'insufficient_funds') {
+    return null;
+  }
+
+  if (failureCategory === 'slippage_exceeded') {
+    const reducedAmountUsd = Number((originalSignal.amountUsd * 0.5).toFixed(8));
+    if (reducedAmountUsd < MIN_TRADE_AMOUNT_USD) {
+      return null;
+    }
+
+    const adaptedSignal: TradeSignal = {
+      ...originalSignal,
+      amountUsd: reducedAmountUsd,
+    };
+    const guardrailCheck = validateAdaptedSignal(adaptedSignal, config, context);
+    if (!guardrailCheck.passed) {
+      return null;
+    }
+
+    return {
+      originalSignal,
+      adaptedSignal,
+      reason: 'Reduced trade size after slippage exceeded the configured limit',
+      strategy: 'reduce_amount',
+    };
+  }
+
+  for (const candidate of watchlistCandidates) {
+    if (!passesWatchlistRiskChecks(candidate)) {
+      continue;
+    }
+
+    const adaptedSignal: TradeSignal = {
+      ...originalSignal,
+      currency: candidate.token_symbol,
+    };
+    const guardrailCheck = validateAdaptedSignal(adaptedSignal, config, context);
+    if (!guardrailCheck.passed) {
+      continue;
+    }
+
+    return {
+      originalSignal,
+      adaptedSignal,
+      reason: `Switched to watchlist alternative ${candidate.token_symbol} after risk flag`,
+      strategy: 'alternative_token',
+    };
+  }
+
+  return null;
 }
 
 /**

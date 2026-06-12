@@ -1,465 +1,362 @@
-/**
- * Unit tests for apps/api/src/services/agent-cron.ts
- *
- * Mocks the @jakartagents/db module so the Supabase client is fully controlled.
- * The key technique is a chainable query-builder mock where each method
- * (.from, .select, .eq, .lte, .gte, .insert, .update) returns `this`,
- * and the final method in the chain resolves to a configurable result.
- */
+const {
+  insertedRowsRef,
+  fromCallsRef,
+  tradeCountRef,
+  mockReadContract,
+  mockGetPositions,
+  mockCalculatePortfolioValue,
+  mockEmitProgress,
+  mockSubmitTradeFeedback,
+  mockCreateAndAttachRunAttestation,
+  mockGetStrategy,
+  mockCalculateTradeAmount,
+  mockEvaluateAdaptedPlan,
+  mockGetWatchlist,
+} = vi.hoisted(() => ({
+  insertedRowsRef: { value: [] as Array<{ table: string; row: any }> },
+  fromCallsRef: { value: [] as string[] },
+  tradeCountRef: { value: 0 },
+  mockReadContract: vi.fn(),
+  mockGetPositions: vi.fn(),
+  mockCalculatePortfolioValue: vi.fn(),
+  mockEmitProgress: vi.fn(),
+  mockSubmitTradeFeedback: vi.fn(),
+  mockCreateAndAttachRunAttestation: vi.fn(),
+  mockGetStrategy: vi.fn(),
+  mockCalculateTradeAmount: vi.fn(),
+  mockEvaluateAdaptedPlan: vi.fn(),
+  mockGetWatchlist: vi.fn(),
+}));
 
-// ---------------------------------------------------------------------------
-// vi.hoisted: variables that are referenced inside vi.mock must be declared
-// here so they are available when the mock factory executes (vi.mock is
-// hoisted above all imports by Vitest).
-// ---------------------------------------------------------------------------
-const { mockFrom, setQueryResult, createCapturingProxy } = vi.hoisted(() => {
-  /** The result every chain resolves to when awaited */
-  let queryResult: { data?: unknown; error?: unknown; count?: number | null } = {
-    data: null,
-    error: null,
+function makeQuery(table: string) {
+  const chain: any = {
+    select: () => chain,
+    eq: () => chain,
+    order: () => chain,
+    limit: () => chain,
+    update: () => chain,
+    lte: async () => ({ data: [], error: null }),
+    gte: async () => ({ count: tradeCountRef.value, error: null }),
+    maybeSingle: async () => ({ data: null, error: null }),
+    insert: async (row: any) => {
+      insertedRowsRef.value.push({ table, row });
+      return { error: null };
+    },
+    not: async () => ({ data: [], error: null }),
+    then: (resolve: (value: any) => void) => resolve({ data: [], error: null }),
   };
 
-  function setQueryResult(r: typeof queryResult) {
-    queryResult = r;
-  }
-
-  /**
-   * Creates a Proxy where every property access returns the proxy itself
-   * (enabling unlimited chaining) and awaiting resolves to `queryResult`.
-   */
-  function createChainableProxy(): any {
-    const handler: ProxyHandler<any> = {
-      get(_target, prop) {
-        if (prop === 'then') {
-          return (resolve: (v: any) => void) => resolve(queryResult);
-        }
-        return (..._args: any[]) => new Proxy({}, handler);
-      },
-    };
-    return new Proxy({}, handler);
-  }
-
-  /**
-   * Creates a proxy that captures the argument passed to `insert` while still
-   * being fully chainable and thenable.
-   */
-  function createCapturingProxy(capture: { insertedRow: any }): any {
-    const handler: ProxyHandler<any> = {
-      get(_t, prop) {
-        if (prop === 'then') {
-          return (resolve: (v: any) => void) => resolve({ error: null });
-        }
-        if (prop === 'insert') {
-          return (row: any) => {
-            capture.insertedRow = row;
-            return new Proxy({}, handler);
-          };
-        }
-        return (..._args: any[]) => new Proxy({}, handler);
-      },
-    };
-    return new Proxy({}, handler);
-  }
-
-  const mockFrom = {
-    fn: null as any, // Will be set below
-  };
-
-  // We cannot call vi.fn inside vi.hoisted directly as `vi` is not the same
-  // context, so we return a plain object and build the actual vi.fn in the
-  // mock factory below. Instead, we return the helpers and a mutable ref.
-  // Actually, we CAN use a simple approach: store a reference that the mock
-  // factory will close over.
-
-  let fromImpl = (_table: string): any => createChainableProxy();
-
-  const mockFromWrapper = {
-    /** Calls recorded for assertions */
-    calls: [] as string[],
-    /** Current implementation */
-    impl: fromImpl,
-    /** The function that supabaseAdmin.from points to */
-    handler(_table: string): any {
-      mockFromWrapper.calls.push(_table);
-      return mockFromWrapper.impl(_table);
-    },
-    /** Reset recorded calls */
-    clear() {
-      mockFromWrapper.calls = [];
-      mockFromWrapper.impl = (_table: string) => createChainableProxy();
-    },
-    /** Override implementation for one call, then revert */
-    mockImplementationOnce(fn: (table: string) => any) {
-      const original = mockFromWrapper.impl;
-      let called = false;
-      mockFromWrapper.impl = (table: string) => {
-        if (!called) {
-          called = true;
-          mockFromWrapper.impl = original;
-          return fn(table);
-        }
-        return original(table);
-      };
-    },
-    /** Override implementation persistently */
-    mockImplementation(fn: (table: string) => any) {
-      mockFromWrapper.impl = fn;
-    },
-  };
-
-  return { mockFrom: mockFromWrapper, setQueryResult, createCapturingProxy };
-});
+  return chain;
+}
 
 vi.mock('@jakartagents/db', () => ({
   createSupabaseAdmin: () => ({
-    from: (table: string) => mockFrom.handler(table),
+    from: (table: string) => {
+      fromCallsRef.value.push(table);
+      return makeQuery(table);
+    },
   }),
 }));
 
-// Mock the Part 2 dependencies that agent-cron now imports
-vi.mock('./news-fetcher', () => ({
-  fetchFxNews: vi.fn().mockResolvedValue([]),
+vi.mock('viem', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('viem')>();
+  return {
+    ...actual,
+    createPublicClient: vi.fn(() => ({
+      readContract: mockReadContract,
+    })),
+    http: vi.fn(() => undefined),
+  };
+});
+
+vi.mock('./position-tracker.js', () => ({
+  getPositions: mockGetPositions,
+  calculatePortfolioValue: mockCalculatePortfolioValue,
+  updatePositionAfterTrade: vi.fn(),
 }));
 
-vi.mock('./llm-analyzer', () => ({
-  analyzeFxNews: vi.fn().mockResolvedValue({
-    signals: [
-      { currency: 'EURm', direction: 'hold', confidence: 35, reasoning: 'ECB holding rates steady', timeHorizon: 'medium' },
-      { currency: 'GBPm', direction: 'hold', confidence: 28, reasoning: 'UK data mixed', timeHorizon: 'short' },
-    ],
-    marketSummary: 'Markets calm, no strong catalysts',
-    sourcesUsed: 1,
-  }),
+vi.mock('./yield-position-tracker.js', () => ({
+  upsertYieldPositionAfterDeposit: vi.fn(),
+  clearYieldPositionAfterWithdraw: vi.fn(),
+  syncYieldPositionsFromChain: vi.fn(),
 }));
 
-vi.mock('./trade-executor', () => ({
-  executeTrade: vi.fn().mockResolvedValue({
-    txHash: '0x123',
-    amountIn: 0n,
-    amountOut: 0n,
-    rate: 1.0,
-  }),
+vi.mock('./agent-events.js', () => ({
+  emitProgress: mockEmitProgress,
 }));
 
-vi.mock('./position-tracker', () => ({
-  getPositions: vi.fn().mockResolvedValue([]),
-  calculatePortfolioValue: vi.fn().mockResolvedValue(0),
-  updatePositionAfterTrade: vi.fn().mockResolvedValue(undefined),
+vi.mock('./agent-registry.js', () => ({
+  submitTradeFeedback: mockSubmitTradeFeedback,
 }));
 
-vi.mock('./rules-engine', () => ({
-  checkGuardrails: vi.fn().mockReturnValue({ passed: true }),
-  calculateTradeAmount: vi.fn().mockReturnValue(0),
+vi.mock('./attestation-service.js', () => ({
+  createAndAttachRunAttestation: mockCreateAndAttachRunAttestation,
 }));
 
-// ---------------------------------------------------------------------------
-// Import the module under test AFTER vi.mock so the mock is in place
-// ---------------------------------------------------------------------------
-import {
-  startAgentCron,
-  runAgentCycle,
-  logTimeline,
-  getTradeCountToday,
-} from './agent-cron';
-import { fetchFxNews } from './news-fetcher';
-import { analyzeFxNews } from './llm-analyzer';
+vi.mock('./strategies/index.js', () => ({
+  getStrategy: mockGetStrategy,
+}));
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+vi.mock('./rules-engine.js', () => ({
+  calculateTradeAmount: mockCalculateTradeAmount,
+  evaluateAdaptedPlan: mockEvaluateAdaptedPlan,
+}));
+
+vi.mock('./token-monitor.js', () => ({
+  getWatchlist: mockGetWatchlist,
+}));
+
+import { MAX_ADAPTATIONS_PER_TICK } from '@jakartagents/shared';
+import { getTradeCountToday, logTimeline, runAgentCycle } from './agent-cron.js';
+
+function makeConfig(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'cfg-1',
+    wallet_address: '0xAGENT',
+    server_wallet_address: '0xSERVER',
+    server_wallet_id: 'sw-1',
+    active: true,
+    frequency: 'daily',
+    max_trade_size_pct: 25,
+    max_allocation_pct: 20,
+    stop_loss_pct: 10,
+    daily_trade_limit: 3,
+    allowed_currencies: ['EURm', 'GBPm', 'ALT'],
+    blocked_currencies: [],
+    custom_prompt: null,
+    agent_type: 'fx',
+    agent_8004_id: null,
+    last_run_at: null,
+    next_run_at: null,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  } as any;
+}
+
+function makeSignal(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    currency: 'EURm',
+    direction: 'buy',
+    confidence: 90,
+    reasoning: 'Momentum is improving',
+    amountUsd: 100,
+    ...overrides,
+  };
+}
+
+function makeStrategy() {
+  return {
+    getProgressSteps: vi.fn(() => ['fetching_news', 'analyzing', 'checking_signals', 'executing_trades']),
+    fetchData: vi.fn().mockResolvedValue({}),
+    analyze: vi.fn().mockResolvedValue({
+      signals: [makeSignal()],
+      summary: 'One actionable signal',
+      sourcesUsed: 1,
+    }),
+    checkGuardrails: vi.fn().mockReturnValue({ passed: true }),
+    executeSignal: vi.fn(),
+  };
+}
+
+function timelineRows() {
+  return insertedRowsRef.value
+    .filter((entry) => entry.table === 'fx_agent_timeline')
+    .map((entry) => entry.row);
+}
+
 beforeEach(() => {
-  mockFrom.clear();
-  setQueryResult({ data: null, error: null });
+  insertedRowsRef.value = [];
+  fromCallsRef.value = [];
+  tradeCountRef.value = 0;
+
+  vi.clearAllMocks();
+
+  mockReadContract.mockResolvedValue(100000000000000000000n);
+  mockGetPositions.mockResolvedValue([]);
+  mockCalculatePortfolioValue.mockResolvedValue(0);
+  mockCreateAndAttachRunAttestation.mockResolvedValue(undefined);
+  mockGetWatchlist.mockResolvedValue([]);
+  mockCalculateTradeAmount.mockReturnValue(100);
+  mockEvaluateAdaptedPlan.mockReset();
+  mockSubmitTradeFeedback.mockResolvedValue(undefined);
 });
 
-// ---------------------------------------------------------------------------
-// logTimeline
-// ---------------------------------------------------------------------------
 describe('logTimeline', () => {
-  it('inserts a row with all fields correctly mapped', async () => {
-    const capture = { insertedRow: null as any };
-    mockFrom.mockImplementationOnce(() => createCapturingProxy(capture));
-
-    await logTimeline('0xABC', 'trade', {
-      summary: 'Bought BNB',
-      detail: { reason: 'bullish' },
-      citations: [{ url: 'https://example.com', title: 'Article', excerpt: 'snippet' }],
-      confidencePct: 85,
-      currency: 'BNB',
-      amountUsd: 100,
-      direction: 'buy',
-      txHash: '0xdeadbeef',
-    });
-
-    expect(mockFrom.calls).toContain('agent_timeline');
-
-    expect(capture.insertedRow).toEqual({
-      wallet_address: '0xABC',
-      event_type: 'trade',
-      summary: 'Bought BNB',
-      detail: { reason: 'bullish' },
-      citations: [{ url: 'https://example.com', title: 'Article', excerpt: 'snippet' }],
-      confidence_pct: 85,
-      currency: 'BNB',
-      amount_usd: 100,
-      direction: 'buy',
-      tx_hash: '0xdeadbeef',
-    });
-  });
-
-  it('uses default values for optional fields', async () => {
-    const capture = { insertedRow: null as any };
-    mockFrom.mockImplementationOnce(() => createCapturingProxy(capture));
-
-    await logTimeline('0x123', 'system', {
-      summary: 'Cycle started',
-    });
-
-    expect(capture.insertedRow).toEqual({
-      wallet_address: '0x123',
-      event_type: 'system',
-      summary: 'Cycle started',
-      detail: {},
-      citations: [],
-      confidence_pct: null,
-      currency: null,
-      amount_usd: null,
-      direction: null,
-      tx_hash: null,
-    });
-  });
-
-  it('logs error on insert failure but does NOT throw', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    setQueryResult({ error: { message: 'insert failed', code: '42P01' } });
-
-    // Should resolve without throwing
-    await expect(logTimeline('0x000', 'system', { summary: 'test' })).resolves.toBeUndefined();
-
-    expect(consoleSpy).toHaveBeenCalledWith(
-      'Failed to log timeline event:',
-      expect.objectContaining({ message: 'insert failed' }),
+  it('writes to the agent-type specific timeline table', async () => {
+    await logTimeline(
+      '0xABC',
+      'decision_adapted',
+      {
+        summary: 'adapted',
+        detail: { strategy: 'reduce_amount' },
+      },
+      'run-1',
+      'yield',
     );
+
+    expect(insertedRowsRef.value).toHaveLength(1);
+    expect(insertedRowsRef.value[0]).toEqual({
+      table: 'yield_agent_timeline',
+      row: expect.objectContaining({
+        wallet_address: '0xABC',
+        event_type: 'decision_adapted',
+        summary: 'adapted',
+        run_id: 'run-1',
+      }),
+    });
   });
 });
 
-// ---------------------------------------------------------------------------
-// getTradeCountToday
-// ---------------------------------------------------------------------------
 describe('getTradeCountToday', () => {
-  it('returns count from query filtered by wallet_address and event_type=trade', async () => {
-    setQueryResult({ count: 5, error: null });
+  it('queries the correct timeline table and returns the count', async () => {
+    tradeCountRef.value = 4;
 
-    const result = await getTradeCountToday('0xWALLET');
+    const count = await getTradeCountToday('0xAGENT', 'fx');
 
-    expect(result).toBe(5);
-    expect(mockFrom.calls).toContain('agent_timeline');
+    expect(count).toBe(4);
+    expect(fromCallsRef.value).toContain('fx_agent_timeline');
   });
+});
 
-  it('returns 0 when count is null', async () => {
-    setQueryResult({ count: null, error: null });
+describe('runAgentCycle adaptive execution', () => {
+  it('logs decision_input before trade execution and passes agentId into attestation creation', async () => {
+    const strategy = makeStrategy();
+    strategy.executeSignal.mockResolvedValue({
+      success: true,
+      txHash: '0xabc',
+      amountUsd: 100,
+    });
+    mockGetStrategy.mockReturnValue(strategy);
 
-    const result = await getTradeCountToday('0xWALLET');
-    expect(result).toBe(0);
-  });
+    await runAgentCycle(makeConfig({ agent_8004_id: 42 }));
 
-  it('throws on query error', async () => {
-    setQueryResult({ count: null, error: { message: 'connection refused' } });
+    const rows = timelineRows();
+    const decisionRow = rows.find((row) => row.event_type === 'decision_input');
+    const tradeRow = rows.find((row) => row.event_type === 'trade');
 
-    await expect(getTradeCountToday('0xWALLET')).rejects.toThrow(
-      'Failed to count trades today: connection refused',
+    expect(decisionRow).toBeDefined();
+    expect(tradeRow).toBeDefined();
+    expect(rows.findIndex((row) => row.event_type === 'decision_input')).toBeLessThan(
+      rows.findIndex((row) => row.event_type === 'trade'),
+    );
+    expect(() => JSON.parse(decisionRow.summary)).not.toThrow();
+    expect(JSON.parse(decisionRow.summary)).toEqual(
+      expect.objectContaining({
+        signal: expect.any(Object),
+        guardrailParams: expect.any(Object),
+        marketDataSnapshot: expect.any(Object),
+      }),
+    );
+    expect(mockCreateAndAttachRunAttestation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 42n,
+      }),
     );
   });
-});
 
-// ---------------------------------------------------------------------------
-// runAgentCycle
-// ---------------------------------------------------------------------------
-describe('runAgentCycle', () => {
-  it('orchestrates full cycle: positions → news → LLM → rules → log', async () => {
-    // Provide at least one news article so the cycle proceeds past the empty-news guard
-    (fetchFxNews as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
-      { title: 'EUR strengthens', url: 'https://example.com/1', source: 'Reuters', excerpt: 'EUR up 0.5%' },
-    ]);
-
-    const insertedRows: any[] = [];
-    mockFrom.mockImplementation(() => {
-      const handler: ProxyHandler<any> = {
-        get(_t, prop) {
-          if (prop === 'then') {
-            return (resolve: (v: any) => void) => resolve({ data: [], error: null, count: 0 });
-          }
-          if (prop === 'insert') {
-            return (row: any) => {
-              insertedRows.push(row);
-              return new Proxy({}, handler);
-            };
-          }
-          return (..._args: any[]) => new Proxy({}, handler);
-        },
-      };
-      return new Proxy({}, handler);
+  it('emits decision_adapted and retries exactly once after a slippage failure', async () => {
+    const strategy = makeStrategy();
+    strategy.executeSignal
+      .mockResolvedValueOnce({
+        success: false,
+        amountUsd: 100,
+        error: 'slippage too high',
+        failureCategory: 'slippage_exceeded',
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        txHash: '0x123',
+        amountUsd: 50,
+      });
+    mockGetStrategy.mockReturnValue(strategy);
+    mockEvaluateAdaptedPlan.mockReturnValue({
+      originalSignal: makeSignal({ amountUsd: 100 }),
+      adaptedSignal: makeSignal({ amountUsd: 50 }),
+      reason: 'Reduced after slippage',
+      strategy: 'reduce_amount',
     });
 
-    const fakeConfig = {
-      id: 'cfg-1',
-      wallet_address: '0xAGENT',
-      server_wallet_address: '0xSERVER',
-      server_wallet_id: 'sw-1',
-      active: true,
-      frequency: 'daily' as const,
-      max_trade_size_pct: 25,
-      max_allocation_pct: 20,
-      stop_loss_pct: 10,
-      daily_trade_limit: 3,
-      allowed_currencies: null,
-      blocked_currencies: null,
-      custom_prompt: null,
-      last_run_at: null,
-      next_run_at: null,
-      created_at: '2025-01-01T00:00:00Z',
-      updated_at: '2025-01-01T00:00:00Z',
-    };
+    await runAgentCycle(makeConfig());
 
-    await runAgentCycle(fakeConfig);
+    const rows = timelineRows();
+    const eventTypes = rows.map((row) => row.event_type);
+    const decisionIndex = eventTypes.indexOf('decision_adapted');
+    const tradeIndex = eventTypes.lastIndexOf('trade');
 
-    expect(mockFrom.calls).toContain('agent_timeline');
-
-    // First insert should be 'system' event: "Agent cycle started"
-    expect(insertedRows[0]).toMatchObject({
-      wallet_address: '0xAGENT',
-      event_type: 'system',
-      summary: 'Agent cycle started',
-    });
-
-    // Second insert should be 'analysis' event with signals in detail
-    expect(insertedRows[1]).toMatchObject({
-      wallet_address: '0xAGENT',
-      event_type: 'analysis',
-    });
-
-    const analysisDetail = insertedRows[1].detail;
-    expect(analysisDetail).toHaveProperty('signals');
-    expect(analysisDetail.signals).toHaveLength(2);
-    expect(analysisDetail.signals[0]).toMatchObject({
-      currency: 'EURm',
-      direction: 'hold',
-      confidence: 35,
-    });
-    expect(analysisDetail.signals[1]).toMatchObject({
-      currency: 'GBPm',
-      direction: 'hold',
-      confidence: 28,
-    });
-    expect(analysisDetail).toHaveProperty('marketSummary', 'Markets calm, no strong catalysts');
-    expect(analysisDetail).toHaveProperty('sourcesUsed', 1);
-
-    // Summary should include per-currency signal info
-    expect(insertedRows[1].summary).toContain('EURm hold 35%');
-    expect(insertedRows[1].summary).toContain('GBPm hold 28%');
-    expect(insertedRows[1].summary).toContain('0 actionable');
+    expect(strategy.executeSignal).toHaveBeenCalledTimes(2);
+    expect(mockEvaluateAdaptedPlan).toHaveBeenCalledTimes(1);
+    expect(decisionIndex).toBeGreaterThan(-1);
+    expect(tradeIndex).toBeGreaterThan(decisionIndex);
+    expect(eventTypes.filter((type) => type === 'decision_adapted')).toHaveLength(1);
   });
 
-  it('skips LLM analysis and logs timeline event when fetchFxNews returns empty array', async () => {
-    // fetchFxNews already returns [] by default in the mock setup
-
-    const insertedRows: any[] = [];
-    mockFrom.mockImplementation(() => {
-      const handler: ProxyHandler<any> = {
-        get(_t, prop) {
-          if (prop === 'then') {
-            return (resolve: (v: any) => void) => resolve({ data: [], error: null, count: 0 });
-          }
-          if (prop === 'insert') {
-            return (row: any) => {
-              insertedRows.push(row);
-              return new Proxy({}, handler);
-            };
-          }
-          return (..._args: any[]) => new Proxy({}, handler);
-        },
-      };
-      return new Proxy({}, handler);
+  it('stops after one adapted retry when execution keeps failing', async () => {
+    const strategy = makeStrategy();
+    strategy.executeSignal.mockResolvedValue({
+      success: false,
+      amountUsd: 100,
+      error: 'slippage too high',
+      failureCategory: 'slippage_exceeded',
+    });
+    mockGetStrategy.mockReturnValue(strategy);
+    mockEvaluateAdaptedPlan.mockReturnValue({
+      originalSignal: makeSignal({ amountUsd: 100 }),
+      adaptedSignal: makeSignal({ amountUsd: 50 }),
+      reason: 'Reduced after slippage',
+      strategy: 'reduce_amount',
     });
 
-    // Reset call tracking on mocked functions
-    (fetchFxNews as ReturnType<typeof vi.fn>).mockClear();
-    (analyzeFxNews as ReturnType<typeof vi.fn>).mockClear();
+    await runAgentCycle(makeConfig());
 
-    const fakeConfig = {
-      id: 'cfg-1',
-      wallet_address: '0xAGENT',
-      server_wallet_address: '0xSERVER',
-      server_wallet_id: 'sw-1',
-      active: true,
-      frequency: 'daily' as const,
-      max_trade_size_pct: 25,
-      max_allocation_pct: 20,
-      stop_loss_pct: 10,
-      daily_trade_limit: 3,
-      allowed_currencies: null,
-      blocked_currencies: null,
-      custom_prompt: null,
-      last_run_at: null,
-      next_run_at: null,
-      created_at: '2025-01-01T00:00:00Z',
-      updated_at: '2025-01-01T00:00:00Z',
-    };
+    const rows = timelineRows();
+    const tradeFailedRows = rows.filter((row) => row.event_type === 'trade_failed');
+    const decisionRows = rows.filter((row) => row.event_type === 'decision_adapted');
 
-    await runAgentCycle(fakeConfig);
-
-    // fetchFxNews should have been called
-    expect(fetchFxNews).toHaveBeenCalled();
-
-    // analyzeFxNews should NOT have been called (empty news guard)
-    expect(analyzeFxNews).not.toHaveBeenCalled();
-
-    // Should have logged "Agent cycle started" and then the empty-news system event
-    expect(insertedRows[0]).toMatchObject({
-      wallet_address: '0xAGENT',
-      event_type: 'system',
-      summary: 'Agent cycle started',
-    });
-
-    expect(insertedRows[1]).toMatchObject({
-      wallet_address: '0xAGENT',
-      event_type: 'system',
-      summary: 'No news articles fetched — skipping analysis',
-    });
-
-    // Should NOT have an analysis event
-    const analysisRows = insertedRows.filter((r: any) => r.event_type === 'analysis');
-    expect(analysisRows).toHaveLength(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// startAgentCron
-// ---------------------------------------------------------------------------
-describe('startAgentCron', () => {
-  it('calls setInterval with 60_000ms', () => {
-    const intervalSpy = vi.spyOn(global, 'setInterval').mockImplementation((() => 1) as any);
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    setQueryResult({ data: [], error: null });
-
-    startAgentCron();
-
-    expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 60_000);
-    expect(console.log).toHaveBeenCalledWith('Starting agent cron (tick every 60s)');
-
-    intervalSpy.mockRestore();
+    expect(strategy.executeSignal).toHaveBeenCalledTimes(MAX_ADAPTATIONS_PER_TICK + 1);
+    expect(tradeFailedRows).toHaveLength(2);
+    expect(decisionRows).toHaveLength(1);
   });
 
-  it('runs agentTick immediately on start', () => {
-    vi.spyOn(global, 'setInterval').mockImplementation((() => 1) as any);
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    setQueryResult({ data: [], error: null });
+  it('emits decision_adapted with adaptedPlan null and does not retry when risk flagged has no alternative', async () => {
+    const strategy = makeStrategy();
+    strategy.executeSignal.mockResolvedValueOnce({
+      success: false,
+      amountUsd: 100,
+      error: 'risk check flagged token',
+      failureCategory: 'risk_flagged',
+    });
+    mockGetStrategy.mockReturnValue(strategy);
+    mockGetWatchlist.mockResolvedValue([]);
+    mockEvaluateAdaptedPlan.mockReturnValue(null);
 
-    startAgentCron();
+    await runAgentCycle(makeConfig());
 
-    // The immediate agentTick call queries supabaseAdmin.from('agent_configs')
-    expect(mockFrom.calls).toContain('agent_configs');
+    const decisionRow = timelineRows().find((row) => row.event_type === 'decision_adapted');
 
-    (global.setInterval as any).mockRestore();
+    expect(strategy.executeSignal).toHaveBeenCalledTimes(1);
+    expect(decisionRow).toBeDefined();
+    expect(JSON.parse(decisionRow!.summary)).toMatchObject({
+      reason: 'risk_flagged',
+      adaptedPlan: null,
+    });
+  });
+
+  it('does not adapt when the first execution succeeds', async () => {
+    const strategy = makeStrategy();
+    strategy.executeSignal.mockResolvedValueOnce({
+      success: true,
+      txHash: '0xabc',
+      amountUsd: 100,
+    });
+    mockGetStrategy.mockReturnValue(strategy);
+
+    await runAgentCycle(makeConfig());
+
+    const rows = timelineRows();
+
+    expect(mockEvaluateAdaptedPlan).not.toHaveBeenCalled();
+    expect(rows.some((row) => row.event_type === 'decision_adapted')).toBe(false);
+    expect(strategy.executeSignal).toHaveBeenCalledTimes(1);
   });
 });

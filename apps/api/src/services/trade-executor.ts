@@ -6,7 +6,11 @@ import {
   createEvmTx,
 } from '@jakartagents/mantle-data';
 import { encodeFunctionData, parseUnits, maxUint256 } from 'viem';
-import { ALL_TOKEN_ADDRESSES, getTokenDecimals } from '@jakartagents/shared';
+import {
+  ALL_TOKEN_ADDRESSES,
+  type FailureCategory,
+  getTokenDecimals,
+} from '@jakartagents/shared';
 import { sendTransactionFromServerWallet } from '../lib/thirdweb-wallet.js';
 
 // ---------------------------------------------------------------------------
@@ -99,11 +103,60 @@ function getMantleDataClient(): MantleDataClient {
 // Types — kept compatible with the original interface
 // ---------------------------------------------------------------------------
 
-export interface TradeResult {
-  txHash: string;
-  amountIn: string;
-  amountOut: string;
-  rate: number;
+export type TradeResult =
+  | {
+      success: true;
+      txHash: string;
+      amountIn: string;
+      amountOut: string;
+      rate: number;
+    }
+  | {
+      success: false;
+      failureCategory: FailureCategory;
+      reason: string;
+    };
+
+function mapFailureCategory(statusOrReason: string, maybeReason?: string): FailureCategory {
+  const combined = `${statusOrReason} ${maybeReason ?? ''}`.toLowerCase();
+
+  if (
+    combined.includes('slippage') ||
+    combined.includes('price impact') ||
+    combined.includes('minimum received')
+  ) {
+    return 'slippage_exceeded';
+  }
+
+  if (
+    combined.includes('risk') ||
+    combined.includes('honeypot') ||
+    combined.includes('unsafe') ||
+    combined.includes('simulation') ||
+    combined.includes('tax')
+  ) {
+    return 'risk_flagged';
+  }
+
+  if (
+    combined.includes('insufficient') ||
+    combined.includes('balance') ||
+    combined.includes('allowance') ||
+    combined.includes('funds')
+  ) {
+    return 'insufficient_funds';
+  }
+
+  return 'other';
+}
+
+function toFailureResult(error: unknown): Extract<TradeResult, { success: false }> {
+  const reason = error instanceof Error ? error.message : String(error);
+  return {
+    success: false,
+    failureCategory: mapFailureCategory(reason),
+    reason,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -127,88 +180,89 @@ export async function executeTrade(params: {
   outTokenAddress?: string;
   slippageBps?: string;
 }): Promise<TradeResult> {
-  const {
-    serverWalletAddress,
-    currency,
-    direction,
-    amountUsd,
-    chain = 'bsc',
-    inTokenAddress,
-    outTokenAddress,
-    slippageBps = DEFAULT_SLIPPAGE_BPS,
-  } = params;
+  try {
+    const {
+      serverWalletAddress,
+      currency,
+      direction,
+      amountUsd,
+      chain = 'bsc',
+      inTokenAddress,
+      outTokenAddress,
+      slippageBps = DEFAULT_SLIPPAGE_BPS,
+    } = params;
 
-  if (amountUsd == null || typeof amountUsd !== 'number' || amountUsd <= 0) {
-    throw new Error(
-      `Invalid trade amount for ${currency}: amountUsd must be a positive number (got ${String(amountUsd)})`,
+    if (amountUsd == null || typeof amountUsd !== 'number' || amountUsd <= 0) {
+      throw new Error(
+        `Invalid trade amount for ${currency}: amountUsd must be a positive number (got ${String(amountUsd)})`,
+      );
+    }
+
+    if (!inTokenAddress || !outTokenAddress) {
+      throw new Error(
+        `Token addresses required: inTokenAddress and outTokenAddress must be provided for ${currency} ${direction}`,
+      );
+    }
+
+    const client = getMantleDataClient();
+    const swapType = direction === 'buy' ? 'buy' : 'sell';
+    const inAmountRaw = BigInt(Math.floor(amountUsd * 1e18)).toString();
+
+    console.log(
+      `[trade] Executing ${direction} ${currency} on ${chain}: ` +
+        `$${amountUsd}, in=${inTokenAddress}, out=${outTokenAddress}`,
     );
-  }
 
-  if (!inTokenAddress || !outTokenAddress) {
-    throw new Error(
-      `Token addresses required: inTokenAddress and outTokenAddress must be provided for ${currency} ${direction}`,
+    const quote = await getAmountOut(client, {
+      chain,
+      inAmount: inAmountRaw,
+      inTokenAddress,
+      outTokenAddress,
+      swapType,
+    });
+
+    console.log(
+      `[trade] Quote: estimateOut=${quote.estimateOut}, decimals=${quote.decimals}`,
     );
+
+    const evmChain = chain as EvmChain;
+    const created = await createEvmTx(client, {
+      chain: evmChain,
+      creatorAddress: serverWalletAddress,
+      inAmount: inAmountRaw,
+      inTokenAddress,
+      outTokenAddress,
+      swapType,
+      slippage: slippageBps,
+    });
+
+    const { data, to, value } = created.txContent;
+    console.log(`[trade] AVE tx built: to=${to}, requestTxId=${created.requestTxId}`);
+
+    await ensureErc20Allowance(inTokenAddress, serverWalletAddress, to, BigInt(inAmountRaw));
+
+    const txHash = await sendTransactionFromServerWallet(serverWalletAddress, {
+      to,
+      data,
+      value: BigInt(value || '0'),
+    });
+
+    const estimateOutNum = Number(quote.estimateOut) || 0;
+    const inAmountNum = Number(inAmountRaw) || 0;
+    const rate = inAmountNum > 0 ? estimateOutNum / inAmountNum : 0;
+
+    console.log(`[trade] Success: txHash=${txHash}`);
+
+    return {
+      success: true,
+      txHash,
+      amountIn: inAmountRaw,
+      amountOut: quote.estimateOut,
+      rate,
+    };
+  } catch (error) {
+    return toFailureResult(error);
   }
-
-  const client = getMantleDataClient();
-  const swapType = direction === 'buy' ? 'buy' : 'sell';
-  const inAmountRaw = BigInt(Math.floor(amountUsd * 1e18)).toString();
-
-  console.log(
-    `[trade] Executing ${direction} ${currency} on ${chain}: ` +
-      `$${amountUsd}, in=${inTokenAddress}, out=${outTokenAddress}`,
-  );
-
-  // Get quote
-  const quote = await getAmountOut(client, {
-    chain,
-    inAmount: inAmountRaw,
-    inTokenAddress,
-    outTokenAddress,
-    swapType,
-  });
-
-  console.log(
-    `[trade] Quote: estimateOut=${quote.estimateOut}, decimals=${quote.decimals}`,
-  );
-
-  // Build swap calldata via AVE, then submit via Thirdweb (gasless, no private key needed)
-  const evmChain = chain as EvmChain;
-  const created = await createEvmTx(client, {
-    chain: evmChain,
-    creatorAddress: serverWalletAddress,
-    inAmount: inAmountRaw,
-    inTokenAddress,
-    outTokenAddress,
-    swapType,
-    slippage: slippageBps,
-  });
-
-  const { data, to, value } = created.txContent;
-  console.log(`[trade] AVE tx built: to=${to}, requestTxId=${created.requestTxId}`);
-
-  // Approve DEX router to spend inToken if needed (ERC20 allowance)
-  await ensureErc20Allowance(inTokenAddress, serverWalletAddress, to, BigInt(inAmountRaw));
-
-  // Submit via Thirdweb sponsored transaction (gasless via EIP-4337 paymaster)
-  const txHash = await sendTransactionFromServerWallet(serverWalletAddress, {
-    to,
-    data,
-    value: BigInt(value || '0'),
-  });
-
-  const estimateOutNum = Number(quote.estimateOut) || 0;
-  const inAmountNum = Number(inAmountRaw) || 0;
-  const rate = inAmountNum > 0 ? estimateOutNum / inAmountNum : 0;
-
-  console.log(`[trade] Success: txHash=${txHash}`);
-
-  return {
-    txHash,
-    amountIn: inAmountRaw,
-    amountOut: quote.estimateOut,
-    rate,
-  };
 }
 
 /**
@@ -226,68 +280,70 @@ export async function executeSwap(params: {
   inTokenAddress?: string;
   outTokenAddress?: string;
 }): Promise<TradeResult> {
-  const {
-    serverWalletAddress,
-    from,
-    to,
-    amount,
-    slippagePct = 1,
-    chain = 'bsc',
-    inTokenAddress,
-    outTokenAddress,
-  } = params;
+  try {
+    const {
+      serverWalletAddress,
+      from,
+      to,
+      amount,
+      slippagePct = 1,
+      chain = 'bsc',
+      inTokenAddress,
+      outTokenAddress,
+    } = params;
 
-  if (!inTokenAddress || !outTokenAddress) {
-    throw new Error(
-      `Token addresses required: inTokenAddress and outTokenAddress must be provided for ${from} → ${to}`,
-    );
+    if (!inTokenAddress || !outTokenAddress) {
+      throw new Error(
+        `Token addresses required: inTokenAddress and outTokenAddress must be provided for ${from} → ${to}`,
+      );
+    }
+
+    const client = getMantleDataClient();
+    const evmChain = chain as EvmChain;
+    const slippageBps = String(Math.round(slippagePct * 100));
+
+    console.log(`[trade] Swap ${amount} ${from} → ${to} on ${chain}`);
+
+    const quote = await getAmountOut(client, {
+      chain,
+      inAmount: amount,
+      inTokenAddress,
+      outTokenAddress,
+      swapType: 'buy',
+    });
+
+    const created = await createEvmTx(client, {
+      chain: evmChain,
+      creatorAddress: serverWalletAddress,
+      inAmount: amount,
+      inTokenAddress,
+      outTokenAddress,
+      swapType: 'buy',
+      slippage: slippageBps,
+    });
+
+    await ensureErc20Allowance(inTokenAddress, serverWalletAddress, created.txContent.to, BigInt(amount));
+
+    const txHash = await sendTransactionFromServerWallet(serverWalletAddress, {
+      to: created.txContent.to,
+      data: created.txContent.data,
+      value: BigInt(created.txContent.value || '0'),
+    });
+
+    const estimateOutNum = Number(quote.estimateOut) || 0;
+    const inAmountNum = Number(amount) || 0;
+    const rate = inAmountNum > 0 ? estimateOutNum / inAmountNum : 0;
+
+    return {
+      success: true,
+      txHash,
+      amountIn: amount,
+      amountOut: quote.estimateOut,
+      rate,
+    };
+  } catch (error) {
+    return toFailureResult(error);
   }
-
-  const client = getMantleDataClient();
-  const evmChain = chain as EvmChain;
-  const slippageBps = String(Math.round(slippagePct * 100));
-
-  console.log(`[trade] Swap ${amount} ${from} → ${to} on ${chain}`);
-
-  // Get quote
-  const quote = await getAmountOut(client, {
-    chain,
-    inAmount: amount,
-    inTokenAddress,
-    outTokenAddress,
-    swapType: 'buy',
-  });
-
-  // Build calldata via AVE, submit via Thirdweb (gasless)
-  const created = await createEvmTx(client, {
-    chain: evmChain,
-    creatorAddress: serverWalletAddress,
-    inAmount: amount,
-    inTokenAddress,
-    outTokenAddress,
-    swapType: 'buy',
-    slippage: slippageBps,
-  });
-
-  // Approve DEX router to spend inToken if needed
-  await ensureErc20Allowance(inTokenAddress, serverWalletAddress, created.txContent.to, BigInt(amount));
-
-  const txHash = await sendTransactionFromServerWallet(serverWalletAddress, {
-    to: created.txContent.to,
-    data: created.txContent.data,
-    value: BigInt(created.txContent.value || '0'),
-  });
-
-  const estimateOutNum = Number(quote.estimateOut) || 0;
-  const inAmountNum = Number(amount) || 0;
-  const rate = inAmountNum > 0 ? estimateOutNum / inAmountNum : 0;
-
-  return {
-    txHash,
-    amountIn: amount,
-    amountOut: quote.estimateOut,
-    rate,
-  };
 }
 
 const ERC20_TRANSFER_ABI = [

@@ -1,4 +1,8 @@
-import { checkGuardrails, calculateTradeAmount } from './rules-engine';
+import {
+  checkGuardrails,
+  calculateTradeAmount,
+  evaluateAdaptedPlan,
+} from './rules-engine';
 
 // ---------------------------------------------------------------------------
 // Helpers – reusable defaults to keep individual tests focused
@@ -10,6 +14,22 @@ function makeSignal(overrides: Partial<{ currency: string; direction: 'buy' | 's
     direction: 'buy' as const,
     confidence: 85,
     reasoning: 'test signal',
+    ...overrides,
+  };
+}
+
+function makeTradeSignal(
+  overrides: Partial<{
+    currency: string;
+    direction: 'buy' | 'sell';
+    confidence: number;
+    reasoning: string;
+    amountUsd: number;
+  }> = {},
+) {
+  return {
+    ...makeSignal(overrides),
+    amountUsd: 100,
     ...overrides,
   };
 }
@@ -54,6 +74,19 @@ function makeParams(overrides: Partial<{
     tradeAmountUsd: 500,
     positionPrices: {} as Record<string, number>,
     availableBuyingPowerUsd: 2000,
+    ...overrides,
+  };
+}
+
+function makeWatchlistCandidate(
+  overrides: Partial<{
+    token_symbol: string;
+    risk_score: { risk_level?: string; honeypot?: boolean } | null;
+  }> = {},
+) {
+  return {
+    token_symbol: 'ALT',
+    risk_score: { risk_level: 'LOW', honeypot: false },
     ...overrides,
   };
 }
@@ -368,6 +401,135 @@ describe('checkGuardrails', () => {
       );
       expect(result).toEqual({ passed: true });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// evaluateAdaptedPlan
+// ---------------------------------------------------------------------------
+
+describe('evaluateAdaptedPlan', () => {
+  it('returns a reduced trade plan for slippage_exceeded within guardrails', () => {
+    const plan = evaluateAdaptedPlan(
+      makeTradeSignal({ amountUsd: 100 }),
+      'slippage_exceeded',
+      makeConfig(),
+      [],
+      {
+        portfolioValueUsd: 10000,
+        availableBuyingPowerUsd: 2000,
+      },
+    );
+
+    expect(plan).not.toBeNull();
+    expect(plan?.strategy).toBe('reduce_amount');
+    expect(plan?.adaptedSignal.amountUsd).toBe(50);
+  });
+
+  it('returns null when the halved slippage amount still exceeds the max trade limit', () => {
+    const plan = evaluateAdaptedPlan(
+      makeTradeSignal({ amountUsd: 300 }),
+      'slippage_exceeded',
+      makeConfig({ maxTradeSizePct: 10, availableBuyingPowerUsd: 1000 }),
+      [],
+      {
+        portfolioValueUsd: 10000,
+        availableBuyingPowerUsd: 1000,
+      },
+    );
+
+    expect(plan).toBeNull();
+  });
+
+  it('returns null when the halved slippage amount falls below the minimum threshold', () => {
+    const plan = evaluateAdaptedPlan(
+      makeTradeSignal({ amountUsd: 0.1 }),
+      'slippage_exceeded',
+      makeConfig(),
+      [],
+      {
+        portfolioValueUsd: 10000,
+        availableBuyingPowerUsd: 2000,
+      },
+    );
+
+    expect(plan).toBeNull();
+  });
+
+  it('returns null for risk_flagged when no watchlist candidates exist', () => {
+    const plan = evaluateAdaptedPlan(
+      makeTradeSignal(),
+      'risk_flagged',
+      makeConfig(),
+      [],
+      {
+        portfolioValueUsd: 10000,
+        availableBuyingPowerUsd: 2000,
+      },
+    );
+
+    expect(plan).toBeNull();
+  });
+
+  it('returns an alternative_token plan for the first clean watchlist candidate', () => {
+    const plan = evaluateAdaptedPlan(
+      makeTradeSignal({ currency: 'BNB', amountUsd: 100 }),
+      'risk_flagged',
+      makeConfig({ allowedCurrencies: ['ALT'] }),
+      [
+        makeWatchlistCandidate({
+          token_symbol: 'ALT',
+          risk_score: { risk_level: 'LOW', honeypot: false },
+        }),
+      ],
+      {
+        portfolioValueUsd: 10000,
+        availableBuyingPowerUsd: 2000,
+      },
+    );
+
+    expect(plan).not.toBeNull();
+    expect(plan?.strategy).toBe('alternative_token');
+    expect(plan?.adaptedSignal.currency).toBe('ALT');
+  });
+
+  it('returns null when all watchlist candidates are also risk flagged', () => {
+    const plan = evaluateAdaptedPlan(
+      makeTradeSignal(),
+      'risk_flagged',
+      makeConfig(),
+      [
+        makeWatchlistCandidate({
+          token_symbol: 'RUG',
+          risk_score: { risk_level: 'HIGH', honeypot: false },
+        }),
+        makeWatchlistCandidate({
+          token_symbol: 'HONEYPOT',
+          risk_score: { risk_level: 'LOW', honeypot: true },
+        }),
+      ],
+      {
+        portfolioValueUsd: 10000,
+        availableBuyingPowerUsd: 2000,
+      },
+    );
+
+    expect(plan).toBeNull();
+  });
+
+  it('returns null for other failures', () => {
+    const plan = evaluateAdaptedPlan(
+      makeTradeSignal(),
+      'other',
+      makeConfig(),
+      [],
+      {
+        portfolioValueUsd: 10000,
+        availableBuyingPowerUsd: 2000,
+      },
+    );
+
+    expect(plan).toBeNull();
   });
 });
 

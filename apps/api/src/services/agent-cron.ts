@@ -2,20 +2,33 @@ import { randomUUID } from 'node:crypto';
 import { createPublicClient, http, type Address, formatUnits } from 'viem';
 import { bsc } from 'viem/chains';
 import { createSupabaseAdmin, type Database } from '@jakartagents/db';
-import { parseFrequencyToMs, type AgentFrequency, type ProgressStep } from '@jakartagents/shared';
+import {
+  DEFAULT_GUARDRAILS,
+  MAX_ADAPTATIONS_PER_TICK,
+  STABLE_TOKENS,
+  parseFrequencyToMs,
+  type AgentFrequency,
+  type ProgressStep,
+  type TradeSignal,
+} from '@jakartagents/shared';
 import { getPositions, calculatePortfolioValue, updatePositionAfterTrade } from './position-tracker.js';
 import {
   upsertYieldPositionAfterDeposit,
   clearYieldPositionAfterWithdraw,
   syncYieldPositionsFromChain,
 } from './yield-position-tracker.js';
-import { calculateTradeAmount } from './rules-engine.js';
+import {
+  calculateTradeAmount,
+  evaluateAdaptedPlan,
+  type AgentConfigForRules,
+} from './rules-engine.js';
 import { emitProgress } from './agent-events.js';
 import { submitTradeFeedback } from './agent-registry.js';
 import { createAndAttachRunAttestation } from './attestation-service.js';
 import { getStrategy } from './strategies/index.js';
 import type { WalletBalance } from './strategies/types.js';
 import { formatExecutionError } from '../lib/format-error.js';
+import { getWatchlist } from './token-monitor.js';
 
 type AgentConfigRow = Database['public']['Tables']['agent_configs']['Row'];
 type TimelineInsert = Database['public']['Tables']['agent_timeline']['Insert'];
@@ -26,6 +39,34 @@ const supabaseAdmin = createSupabaseAdmin(
 );
 
 const TICK_INTERVAL_MS = 60_000; // Check every minute
+
+function stringifyDecisionSnapshot(value: unknown): string {
+  return JSON.stringify(value, (_key, currentValue) =>
+    typeof currentValue === 'bigint' ? currentValue.toString() : currentValue,
+  );
+}
+
+function getFxRulesConfig(
+  config: AgentConfigRow,
+  availableBuyingPowerUsd: number,
+): AgentConfigForRules {
+  const rawAllowed = (config.allowed_currencies ?? []) as string[];
+  const allowedCurrencies =
+    rawAllowed.length === 0 || rawAllowed.includes('ALL')
+      ? STABLE_TOKENS.filter((token) => token !== 'USDm')
+      : rawAllowed;
+  const defaults = DEFAULT_GUARDRAILS.moderate;
+
+  return {
+    maxTradeSizePct: config.max_trade_size_pct ?? defaults.maxTradeSizePct,
+    maxAllocationPct: config.max_allocation_pct ?? defaults.maxAllocationPct,
+    stopLossPct: config.stop_loss_pct ?? defaults.stopLossPct,
+    dailyTradeLimit: config.daily_trade_limit ?? defaults.dailyTradeLimit,
+    allowedCurrencies,
+    blockedCurrencies: (config.blocked_currencies ?? []) as string[],
+    availableBuyingPowerUsd,
+  };
+}
 
 /**
  * Start the agent cron loop. Called once on server boot.
@@ -110,11 +151,19 @@ export async function runAgentCycle(config: AgentConfigRow): Promise<void> {
   const strategy = getStrategy(agentType);
   const progressSteps = strategy.getProgressSteps() as ProgressStep[];
   const attachRunAttestationIfPossible = async () => {
+    if (config.agent_8004_id == null) {
+      console.warn(
+        `[agent:${walletAddress.slice(0, 8)}:${agentType}] Skipping attestation: agent_8004_id is missing`,
+      );
+      return;
+    }
+
     try {
       await createAndAttachRunAttestation({
         walletAddress,
         agentType: agentType as 'fx' | 'yield',
         runId,
+        agentId: BigInt(config.agent_8004_id),
       });
     } catch (error) {
       console.error(
@@ -274,9 +323,12 @@ export async function runAgentCycle(config: AgentConfigRow): Promise<void> {
       serverWalletId: config.server_wallet_id,
       serverWalletAddress: config.server_wallet_address,
     };
+    const watchlistCandidates =
+      agentType === 'fx' ? await getWatchlist(walletAddress).catch(() => []) : [];
 
     let tradeCount = 0;
     let blockedCount = 0;
+    let decisionInputLogged = false;
 
     for (const signal of signals) {
       const s = signal as any;
@@ -326,91 +378,230 @@ export async function runAgentCycle(config: AgentConfigRow): Promise<void> {
         continue;
       }
 
+      if (!decisionInputLogged) {
+        const snapshot = {
+          signal: JSON.parse(JSON.stringify(signal)) as Record<string, unknown>,
+          guardrailParams:
+            agentType === 'fx'
+              ? {
+                  ...getFxRulesConfig(config, availableBuyingPowerUsd),
+                  dailyTradeCount: tradesToday,
+                  ruleCheck: {
+                    passed: check.passed,
+                    ruleName: check.ruleName ?? null,
+                    blockedReason: check.blockedReason ?? null,
+                  },
+                }
+              : {
+                  strategyParams: (config.strategy_params ?? {}) as Record<string, unknown>,
+                  dailyTradeCount: tradesToday,
+                  ruleCheck: {
+                    passed: check.passed,
+                    ruleName: check.ruleName ?? null,
+                    blockedReason: check.blockedReason ?? null,
+                  },
+                },
+          marketDataSnapshot: {
+            fetchedData: data as Record<string, unknown>,
+            portfolioValueUsd: portfolioValue,
+            positions: positions as Record<string, unknown>[],
+            walletBalances,
+            analysisSummary: summary,
+            sourcesUsed,
+          },
+        };
+
+        await logTimeline(
+          walletAddress,
+          'decision_input',
+          {
+            summary: stringifyDecisionSnapshot(snapshot),
+            detail: snapshot,
+            confidencePct:
+              typeof s.confidence === 'number' ? s.confidence : undefined,
+            currency: agentType === 'fx' ? s.currency : undefined,
+            amountUsd: typeof s.amountUsd === 'number' ? s.amountUsd : undefined,
+            direction:
+              agentType === 'fx' &&
+              (s.direction === 'buy' || s.direction === 'sell')
+                ? s.direction
+                : undefined,
+          },
+          runId,
+          agentType,
+        );
+        decisionInputLogged = true;
+      }
+
+      const baseSignal =
+        agentType === 'fx'
+          ? ({
+              currency: s.currency,
+              direction: s.direction,
+              confidence: s.confidence,
+              reasoning: s.reasoning,
+              amountUsd: s.amountUsd,
+            } satisfies TradeSignal)
+          : null;
+
       // Execute signal
       try {
-        emitProgress(walletAddress, executeStep, `Executing ${signalAction} ${signalLabel}...`);
-        const result = await strategy.executeSignal(signal, wallet, config);
+        let signalToExecute: unknown = signal;
+        let adaptationCount = 0;
 
-        if (result.success) {
-          tradeCount++;
-          const simTag = result.simulated ? ' [paper]' : '';
-          emitProgress(walletAddress, executeStep,
-            `Executed ${signalAction} ${signalLabel}${result.amountUsd ? ` ($${result.amountUsd.toFixed(2)})` : ''}${simTag}`,
-          );
-          await logTimeline(walletAddress, 'trade', {
-            summary: `${signalAction} ${signalLabel}${result.amountUsd ? ` ($${result.amountUsd.toFixed(2)})` : ''}${simTag}`,
-            detail: { signal, result, simulated: result.simulated ?? false },
-            txHash: result.txHash,
-            amountUsd: result.amountUsd,
-          }, runId, agentType);
+        while (true) {
+          const current = signalToExecute as any;
+          const currentLabel = current.currency ?? current.vaultName ?? current.vaultAddress?.slice(0, 10) ?? 'unknown';
+          const currentAction = current.direction ?? current.action ?? 'unknown';
 
-          // Update yield_positions so vault deposits appear in portfolio
-          if (agentType === 'yield' && result.vaultAddress && result.amountUsd != null) {
-            console.log(`[yield] Saving position: wallet=${walletAddress}, vault=${result.vaultAddress}, amount=$${result.amountUsd}`);
-            try {
-              await upsertYieldPositionAfterDeposit({
-                walletAddress,
-                serverWalletAddress: config.server_wallet_address,
-                vaultAddress: result.vaultAddress as Address,
-                amountUsd: result.amountUsd,
-                protocol: (s.vaultName ?? signalLabel ?? 'pancakeswap-v3')
-                  .toLowerCase()
-                  .replace(/\s+/g, '-'),
-              });
-              console.log(`[yield] Position saved OK`);
-            } catch (err) {
-              console.error('[yield] Failed to save position:', err);
-            }
-            // Refresh guardrail context so next signal sees updated positions
-            guardrailContext.positions.push({
-              vault_address: result.vaultAddress,
-              vaultAddress: result.vaultAddress,
-              deposit_amount_usd: result.amountUsd,
-              depositAmountUsd: result.amountUsd,
-              deposited_at: new Date().toISOString(),
-              depositedAt: new Date().toISOString(),
-            });
-          }
+          emitProgress(walletAddress, executeStep, `Executing ${currentAction} ${currentLabel}...`);
+          const result = await strategy.executeSignal(signalToExecute, wallet, config);
 
-          // Clear yield_positions after successful withdraw
-          if (agentType === 'yield' && signalAction === 'withdraw' && s.vaultAddress) {
-            clearYieldPositionAfterWithdraw({
-              walletAddress,
-              vaultAddress: s.vaultAddress,
-            }).catch(err => console.error('[yield] Failed to clear position:', err.message));
-            // Refresh guardrail context: remove withdrawn vault from positions
-            const vaultKey = (s.vaultAddress as string).toLowerCase();
-            guardrailContext.positions = guardrailContext.positions.filter(
-              (p: any) => (p.vault_address ?? p.vaultAddress ?? '').toLowerCase() !== vaultKey,
+          if (result.success) {
+            tradeCount++;
+            const simTag = result.simulated ? ' [paper]' : '';
+            emitProgress(walletAddress, executeStep,
+              `Executed ${currentAction} ${currentLabel}${result.amountUsd ? ` ($${result.amountUsd.toFixed(2)})` : ''}${simTag}`,
             );
+            await logTimeline(walletAddress, 'trade', {
+              summary: `${currentAction} ${currentLabel}${result.amountUsd ? ` ($${result.amountUsd.toFixed(2)})` : ''}${simTag}`,
+              detail: {
+                signal: signalToExecute,
+                originalSignal: signal,
+                result,
+                simulated: result.simulated ?? false,
+                adaptationCount,
+              },
+              txHash: result.txHash,
+              amountUsd: result.amountUsd,
+              currency: agentType === 'fx' ? current.currency : undefined,
+              direction: agentType === 'fx' ? (current.direction as 'buy' | 'sell') : undefined,
+            }, runId, agentType);
+
+            if (agentType === 'yield' && result.vaultAddress && result.amountUsd != null) {
+              console.log(`[yield] Saving position: wallet=${walletAddress}, vault=${result.vaultAddress}, amount=$${result.amountUsd}`);
+              try {
+                await upsertYieldPositionAfterDeposit({
+                  walletAddress,
+                  serverWalletAddress: config.server_wallet_address,
+                  vaultAddress: result.vaultAddress as Address,
+                  amountUsd: result.amountUsd,
+                  protocol: (s.vaultName ?? currentLabel ?? 'pancakeswap-v3')
+                    .toLowerCase()
+                    .replace(/\s+/g, '-'),
+                });
+                console.log(`[yield] Position saved OK`);
+              } catch (err) {
+                console.error('[yield] Failed to save position:', err);
+              }
+              guardrailContext.positions.push({
+                vault_address: result.vaultAddress,
+                vaultAddress: result.vaultAddress,
+                deposit_amount_usd: result.amountUsd,
+                depositAmountUsd: result.amountUsd,
+                deposited_at: new Date().toISOString(),
+                depositedAt: new Date().toISOString(),
+              });
+            }
+
+            if (agentType === 'yield' && currentAction === 'withdraw' && current.vaultAddress) {
+              clearYieldPositionAfterWithdraw({
+                walletAddress,
+                vaultAddress: current.vaultAddress,
+              }).catch(err => console.error('[yield] Failed to clear position:', err.message));
+              const vaultKey = (current.vaultAddress as string).toLowerCase();
+              guardrailContext.positions = guardrailContext.positions.filter(
+                (p: any) => (p.vault_address ?? p.vaultAddress ?? '').toLowerCase() !== vaultKey,
+              );
+            }
+
+            if (agentType === 'fx' && currentAction === 'buy' && result.amountUsd != null) {
+              availableBuyingPowerUsd -= result.amountUsd;
+              guardrailContext.availableBuyingPowerUsd = availableBuyingPowerUsd;
+            }
+
+            if (config.agent_8004_id && result.txHash) {
+              submitTradeFeedback({
+                serverWalletId: config.server_wallet_id,
+                serverWalletAddress: config.server_wallet_address,
+                agentId: BigInt(config.agent_8004_id),
+                reasoning: current.reasoning ?? '',
+                currency: current.currency ?? currentLabel,
+                direction: currentAction,
+                tradeTxHash: result.txHash,
+              }).catch(err => console.error('[8004] Failed to submit reputation feedback:', err.message));
+            }
+
+            break;
           }
 
-          // Option D: Decrement available balance after successful buy
-          if (agentType === 'fx' && signalAction === 'buy' && result.amountUsd != null) {
-            availableBuyingPowerUsd -= result.amountUsd;
-            guardrailContext.availableBuyingPowerUsd = availableBuyingPowerUsd;
-          }
-
-          // Submit ERC-8004 reputation feedback (non-blocking)
-          if (config.agent_8004_id && result.txHash) {
-            submitTradeFeedback({
-              serverWalletId: config.server_wallet_id,
-              serverWalletAddress: config.server_wallet_address,
-              agentId: BigInt(config.agent_8004_id),
-              reasoning: s.reasoning ?? '',
-              currency: s.currency ?? signalLabel,
-              direction: signalAction,
-              tradeTxHash: result.txHash,
-            }).catch(err => console.error('[8004] Failed to submit reputation feedback:', err.message));
-          }
-        } else {
+          const failureMessage = result.error ?? 'Unknown execution failure';
           emitProgress(walletAddress, executeStep,
-            `Failed ${signalAction} ${signalLabel}: ${result.error}`,
+            `Failed ${currentAction} ${currentLabel}: ${failureMessage}`,
           );
-          await logTimeline(walletAddress, 'system', {
-            summary: `Execution failed for ${signalLabel}: ${formatExecutionError(result.error)}`,
-            detail: { signal, error: result.error },
+          await logTimeline(walletAddress, 'trade_failed', {
+            summary: `Execution failed for ${currentLabel}: ${formatExecutionError(failureMessage)}`,
+            detail: {
+              signal: signalToExecute,
+              originalSignal: signal,
+              error: failureMessage,
+              failureCategory: result.failureCategory ?? 'other',
+              adaptationCount,
+            },
+            amountUsd: result.amountUsd,
+            currency: agentType === 'fx' ? current.currency : undefined,
+            direction: agentType === 'fx' ? (current.direction as 'buy' | 'sell') : undefined,
           }, runId, agentType);
+
+          if (
+            agentType !== 'fx' ||
+            !baseSignal ||
+            !result.failureCategory ||
+            adaptationCount >= MAX_ADAPTATIONS_PER_TICK
+          ) {
+            break;
+          }
+
+          const adaptedPlan = evaluateAdaptedPlan(
+            signalToExecute as TradeSignal,
+            result.failureCategory,
+            getFxRulesConfig(config, availableBuyingPowerUsd),
+            watchlistCandidates,
+            {
+              positions: guardrailContext.positions.map((position: any) => ({
+                tokenSymbol: position.token_symbol ?? position.tokenSymbol,
+                balance: position.balance,
+                avgEntryRate: position.avg_entry_rate ?? position.avgEntryRate ?? 0,
+              })),
+              portfolioValueUsd: guardrailContext.portfolioValueUsd,
+              tradesToday: tradesToday + tradeCount,
+              positionPrices: guardrailContext.positionPrices,
+              availableBuyingPowerUsd,
+            },
+          );
+
+          await logTimeline(walletAddress, 'decision_adapted', {
+            summary: JSON.stringify({
+              originalPlan: signalToExecute,
+              reason: result.failureCategory,
+              adaptedPlan,
+            }),
+            detail: {
+              originalPlan: signalToExecute,
+              reason: result.failureCategory,
+              adaptedPlan,
+            },
+            amountUsd: adaptedPlan?.adaptedSignal.amountUsd ?? baseSignal.amountUsd,
+            currency: adaptedPlan?.adaptedSignal.currency ?? baseSignal.currency,
+            direction: baseSignal.direction,
+          }, runId, agentType);
+
+          if (!adaptedPlan) {
+            break;
+          }
+
+          adaptationCount += 1;
+          signalToExecute = adaptedPlan.adaptedSignal;
         }
       } catch (execErr) {
         emitProgress(walletAddress, executeStep,

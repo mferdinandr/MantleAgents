@@ -45,12 +45,20 @@ export const FREQUENCY_MS: Record<string, number> = {
 
 export type TimelineEventType =
   | 'trade'
+  | 'trade_failed'
   | 'analysis'
   | 'funding'
   | 'guardrail'
+  | 'decision_input'
+  | 'decision_adapted'
   | 'system';
 
 export type TradeDirection = 'buy' | 'sell';
+export type FailureCategory =
+  | 'slippage_exceeded'
+  | 'risk_flagged'
+  | 'insufficient_funds'
+  | 'other';
 
 export interface AgentConfig {
   id: string;
@@ -126,7 +134,23 @@ export interface Signal {
   direction: TradeDirection;
   confidence: number;
   reasoning: string;
+  amountUsd?: number;
 }
+
+export interface TradeSignal extends Signal {
+  amountUsd: number;
+}
+
+export type AdaptationStrategy = 'reduce_amount' | 'alternative_token' | 'abort';
+
+export interface AdaptedPlan {
+  originalSignal: TradeSignal;
+  adaptedSignal: TradeSignal;
+  reason: string;
+  strategy: AdaptationStrategy;
+}
+
+export const MAX_ADAPTATIONS_PER_TICK = 1;
 
 /** Signal as returned by the LLM (includes hold and timeHorizon) */
 export interface AnalysisSignal {

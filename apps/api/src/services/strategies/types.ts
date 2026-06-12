@@ -1,5 +1,5 @@
 import type { Database } from '@jakartagents/db';
-import type { GuardrailCheck } from '@jakartagents/shared';
+import type { FailureCategory, GuardrailCheck } from '@jakartagents/shared';
 
 export type AgentConfigRow = Database['public']['Tables']['agent_configs']['Row'];
 
@@ -29,6 +29,7 @@ export interface ExecutionResult {
   amountUsd?: number;
   vaultAddress?: string;
   error?: string;
+  failureCategory?: FailureCategory;
   simulated?: boolean;
 }
 
