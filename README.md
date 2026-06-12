@@ -154,6 +154,19 @@ pnpm dev
 
 The API server runs on `http://localhost:4000` and the web app on `http://localhost:3000`.
 
+## Onboarding
+
+1. Install MetaMask or use any EVM wallet you already trust. If you are new to wallets, MetaMask is the simplest path: install the browser extension, create a wallet, and keep the recovery phrase private.
+2. Open the web app and connect your wallet. The app uses Sign-In With Ethereum, so you will sign a message to prove wallet ownership. This does not transfer funds.
+3. Get Mantle Sepolia testnet MNT from the faucet: https://faucet.sepolia.mantle.xyz. Paste your connected wallet address, request funds, then return to the onboarding page and click "Recheck balance".
+4. Choose an agent and register it from the dashboard flow. Registration creates the agent's on-chain ERC-8004 identity and links it to the execution wallet.
+5. Configure guardrails. Start with conservative limits if you are unsure: small trade size, low allocation cap, daily trade limit, and a stop-loss threshold.
+6. Start the agent. The dashboard will show live progress, timeline entries, transaction links, and on-chain attestation status as runs complete.
+
+### Roadmap: Account Abstraction / Gasless UX
+
+JakartAgents is currently non-custodial via Privy/RealClaw for trading execution: the platform routes actions through the agent execution layer and never stores raw user private keys. Account Abstraction is planned, not yet implemented. The intended extension is to use thirdweb smart accounts with a Mantle paymaster for non-trading actions such as publishing strategies, updating guardrails, and committing configuration changes, so users can complete routine agent-management actions without manually holding gas for every update.
+
 ### Deploying / Re-deploying Contracts
 
 ```bash
