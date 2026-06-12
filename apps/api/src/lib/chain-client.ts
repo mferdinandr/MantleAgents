@@ -4,7 +4,9 @@
 import { createPublicClient, http } from 'viem';
 import { MANTLE_CHAIN, mantleRpcUrl } from './chains.js';
 
-export const chainClient = createPublicClient({
+export const publicClient = createPublicClient({
   chain: MANTLE_CHAIN,
   transport: http(mantleRpcUrl()),
 });
+
+export const chainClient = publicClient;
