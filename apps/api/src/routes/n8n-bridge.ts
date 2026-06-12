@@ -21,6 +21,7 @@ import { createAndAttachRunAttestation } from '../services/attestation-service.j
 import { executeTrade } from '../services/trade-executor.js';
 import { checkAveContractRisk } from '../services/tools/market-data.js';
 import { validateN8nApiKey } from '../services/n8n-security.js';
+import { provisionUserWorkflow } from '../services/n8n-provisioner.js';
 
 type N8nBridgeDependencies = {
   getMarketData: typeof getN8nMarketData;
@@ -266,6 +267,17 @@ export async function n8nBridgeRoutes(
   app.get(
     '/provision',
     { preHandler: authMiddleware },
-    async (_request, reply) => reply.status(501).send({ error: 'Workflow provisioning not implemented yet' }),
+    async (request, reply) => {
+      const walletAddress = request.user?.walletAddress;
+      if (!walletAddress) return reply.status(401).send({ error: 'Unauthorized' });
+
+      try {
+        const result = await provisionUserWorkflow(walletAddress);
+        return reply.send(result);
+      } catch (error) {
+        request.log.error({ err: error }, '[n8n] provision failed');
+        return reply.status(500).send({ error: 'Failed to provision workflow' });
+      }
+    },
   );
 }

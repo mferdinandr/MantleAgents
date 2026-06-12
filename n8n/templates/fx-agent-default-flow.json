@@ -1,0 +1,245 @@
+{
+  "name": "FX Agent Default Flow",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "jka-trigger-001",
+      "name": "Start",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "jka-assign-wallet",
+              "name": "walletAddress",
+              "value": "={{ $env.WALLET_ADDRESS }}",
+              "type": "string"
+            },
+            {
+              "id": "jka-assign-agent",
+              "name": "agentType",
+              "value": "fx",
+              "type": "string"
+            },
+            {
+              "id": "jka-assign-run",
+              "name": "runId",
+              "value": "={{ $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "jka-assign-agentid",
+              "name": "agentId",
+              "value": "={{ $env.AGENT_8004_ID ?? '0' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "jka-set-001",
+      "name": "Initialize Run",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.API_BASE_URL }}/api/n8n/market-data",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Api-Key",
+              "value": "={{ $env.N8N_BRIDGE_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ walletAddress: $json.walletAddress, agentType: $json.agentType, chain: $env.DEFAULT_CHAIN ?? 'mantle', tokenAddress: $env.DEFAULT_TOKEN_ADDRESS ?? '' }) }}",
+        "options": {}
+      },
+      "id": "jka-http-001",
+      "name": "Get Market Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.API_BASE_URL }}/api/n8n/signal-analysis",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Api-Key",
+              "value": "={{ $env.N8N_BRIDGE_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ...($json), walletAddress: $('Initialize Run').item.json.walletAddress, runId: $('Initialize Run').item.json.runId }) }}",
+        "options": {}
+      },
+      "id": "jka-http-002",
+      "name": "AI Signal Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.API_BASE_URL }}/api/n8n/guardrail-check",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Api-Key",
+              "value": "={{ $env.N8N_BRIDGE_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ...($json), walletAddress: $('Initialize Run').item.json.walletAddress }) }}",
+        "options": {}
+      },
+      "id": "jka-http-003",
+      "name": "Guardrail Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.API_BASE_URL }}/api/n8n/risk-check",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Api-Key",
+              "value": "={{ $env.N8N_BRIDGE_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ walletAddress: $('Initialize Run').item.json.walletAddress, tokenAddress: $env.DEFAULT_TOKEN_ADDRESS ?? '', chain: $env.DEFAULT_CHAIN ?? 'mantle' }) }}",
+        "options": {}
+      },
+      "id": "jka-http-004",
+      "name": "Risk Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.API_BASE_URL }}/api/n8n/execute-trade",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Api-Key",
+              "value": "={{ $env.N8N_BRIDGE_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ walletAddress: $('Initialize Run').item.json.walletAddress, agentType: $('Initialize Run').item.json.agentType, runId: $('Initialize Run').item.json.runId, signal: $('AI Signal Analysis').item.json.signals?.[0] ?? null, guardrailResult: $('Guardrail Check').item.json, riskResult: $json }) }}",
+        "options": {}
+      },
+      "id": "jka-http-005",
+      "name": "Execute Trade",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.API_BASE_URL }}/api/n8n/commit-attestation",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Api-Key",
+              "value": "={{ $env.N8N_BRIDGE_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ walletAddress: $('Initialize Run').item.json.walletAddress, agentType: $('Initialize Run').item.json.agentType, runId: $('Initialize Run').item.json.runId, agentId: $('Initialize Run').item.json.agentId }) }}",
+        "options": {}
+      },
+      "id": "jka-http-006",
+      "name": "Commit Attestation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 300]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [{ "node": "Initialize Run", "type": "main", "index": 0 }]
+      ]
+    },
+    "Initialize Run": {
+      "main": [
+        [{ "node": "Get Market Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Market Data": {
+      "main": [
+        [{ "node": "AI Signal Analysis", "type": "main", "index": 0 }]
+      ]
+    },
+    "AI Signal Analysis": {
+      "main": [
+        [{ "node": "Guardrail Check", "type": "main", "index": 0 }]
+      ]
+    },
+    "Guardrail Check": {
+      "main": [
+        [{ "node": "Risk Check", "type": "main", "index": 0 }]
+      ]
+    },
+    "Risk Check": {
+      "main": [
+        [{ "node": "Execute Trade", "type": "main", "index": 0 }]
+      ]
+    },
+    "Execute Trade": {
+      "main": [
+        [{ "node": "Commit Attestation", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "jka-v1-fx-default",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": ""
+  },
+  "tags": [
+    { "name": "jakartagents" },
+    { "name": "fx-agent" }
+  ]
+}

@@ -15,7 +15,7 @@
 - [x] 2.5 Add `N8nExecuteTradeRequest` and `N8nExecuteTradeResponse` types (reuse `TradeResult` from Change 03)
 - [x] 2.6 Add `N8nCommitAttestationRequest` and `N8nCommitAttestationResponse` types
 - [x] 2.7 Export all types from `packages/shared/index.ts`
-- [ ] 2.8 Run `pnpm type-check` — exit 0
+- [x] 2.8 Run `pnpm type-check` — exit 0
 
 ## 3. n8n Bridge Route Plugin
 
@@ -42,27 +42,27 @@
 
 ## 5. Workflow Template
 
-- [ ] 5.1 Create directory `n8n/templates/`
-- [ ] 5.2 Build `n8n/templates/fx-agent-default-flow.json` as an n8n workflow export with 6 HTTP Request nodes in sequence: Get Market Data → AI Signal Analysis → Guardrail Check → Risk Check → Execute Trade → Commit Attestation
-- [ ] 5.3 Use `{{$env.API_BASE_URL}}` as the base URL in all HTTP Request node URLs
-- [ ] 5.4 Add `X-N8N-Api-Key` header expression `{{$credentials.n8nBridgeApiKey}}` to each HTTP Request node
+- [x] 5.1 Create directory `n8n/templates/`
+- [x] 5.2 Build `n8n/templates/fx-agent-default-flow.json` as an n8n workflow export with 6 HTTP Request nodes in sequence: Get Market Data → AI Signal Analysis → Guardrail Check → Risk Check → Execute Trade → Commit Attestation
+- [x] 5.3 Use `{{$env.API_BASE_URL}}` as the base URL in all HTTP Request node URLs
+- [x] 5.4 Add `X-N8N-Api-Key` header expression `{{$credentials.n8nBridgeApiKey}}` to each HTTP Request node
 - [ ] 5.5 Import template into a running local n8n instance via `POST /api/v1/workflows` and verify it loads without errors in the canvas
 
 ## 6. First-Visit Workflow Provisioning
 
 - [x] 6.1 Add `n8n_workflow_id` column (nullable text) to `user_profiles` via a new Supabase migration
-- [ ] 6.2 Create `apps/api/src/services/n8n-provisioner.ts` with `provisionUserWorkflow(walletAddress)`: check `user_profiles.n8n_workflow_id`; if null, POST template to n8n REST API with substituted params; store returned workflow ID
-- [ ] 6.3 Add `GET /api/n8n/provision` endpoint (authenticated via existing SIWE middleware) that calls `provisionUserWorkflow` and returns `{ workflowId, n8nBaseUrl }`
-- [ ] 6.4 Verify idempotency: calling provision twice for the same user does not create a second workflow
+- [x] 6.2 Create `apps/api/src/services/n8n-provisioner.ts` with `provisionUserWorkflow(walletAddress)`: check `user_profiles.n8n_workflow_id`; if null, POST template to n8n REST API with substituted params; store returned workflow ID
+- [x] 6.3 Add `GET /api/n8n/provision` endpoint (authenticated via existing SIWE middleware) that calls `provisionUserWorkflow` and returns `{ workflowId, n8nBaseUrl }`
+- [x] 6.4 Verify idempotency: calling provision twice for the same user does not create a second workflow
 
 ## 7. /orchestration UI Page
 
-- [ ] 7.1 Create `apps/web/src/app/(app)/orchestration/page.tsx` — server component, fetches `GET /api/n8n/provision` on render
-- [ ] 7.2 Generate short-lived JWT (HMAC-SHA256, 5-minute TTL) from `walletAddress` server-side; append as `?token=<jwt>` to iframe `src`
-- [ ] 7.3 Render `<iframe src="{N8N_BASE_URL}/workflow/{workflowId}?token=..." />` with appropriate `allow` and `sandbox` attributes
-- [ ] 7.4 Add `frame-src {NEXT_PUBLIC_N8N_BASE_URL}` to Next.js `Content-Security-Policy` header in `next.config.ts`
-- [ ] 7.5 Add "Orchestration Canvas" navigation link in the sidebar/nav (next to existing agent pages)
-- [ ] 7.6 Verify page is protected by the `(app)` auth guard (unauthenticated → redirect to login)
+- [x] 7.1 Create `apps/web/src/app/(app)/orchestration/page.tsx` — server component, fetches `GET /api/n8n/provision` on render
+- [x] 7.2 Generate short-lived JWT (HMAC-SHA256, 5-minute TTL) from `walletAddress` server-side; append as `?token=<jwt>` to iframe `src`
+- [x] 7.3 Render `<iframe src="{N8N_BASE_URL}/workflow/{workflowId}?token=..." />` with appropriate `allow` and `sandbox` attributes
+- [x] 7.4 Add `frame-src {NEXT_PUBLIC_N8N_BASE_URL}` to Next.js `Content-Security-Policy` header in `next.config.ts`
+- [x] 7.5 Add "Orchestration Canvas" navigation link in the sidebar/nav (next to existing agent pages)
+- [x] 7.6 Verify page is protected by the `(app)` auth guard (unauthenticated → redirect to login)
 
 ## 8. Manual End-to-End Verification
 
@@ -75,6 +75,6 @@
 
 ## 9. Cleanup
 
-- [ ] 9.1 Run `pnpm type-check` — exit 0
-- [ ] 9.2 Run `pnpm --filter @jakartagents/web build` — exit 0
-- [ ] 9.3 Add `N8N_BASIC_AUTH_USER`, `N8N_BASIC_AUTH_PASSWORD`, `N8N_BASE_URL`, `N8N_API_KEY`, `N8N_BRIDGE_API_KEY_SECRET` to README environment variables table
+- [x] 9.1 Run `pnpm type-check` — exit 0
+- [x] 9.2 Run `pnpm --filter @jakartagents/web build` — exit 0
+- [x] 9.3 Add `N8N_BASIC_AUTH_USER`, `N8N_BASIC_AUTH_PASSWORD`, `N8N_BASE_URL`, `N8N_API_KEY`, `N8N_BRIDGE_API_KEY_SECRET` to README environment variables table
