@@ -4,19 +4,26 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "compile": "tsx scripts/compile-all.ts",
     "test": "pnpm exec vitest run --config vitest.config.ts",
     "deploy:tokens": "tsx scripts/deploy-mock-tokens.ts",
+    "deploy:dex": "tsx scripts/deploy-dex.ts",
     "deploy:attestation-registry": "tsx scripts/deploy-attestation-registry.ts",
     "verify:registries": "tsx scripts/verify-registries.ts"
   },
   "dependencies": {
+    "@uniswap/lib": "4.0.1-alpha",
+    "@uniswap/v2-core": "1.0.1",
+    "@uniswap/v2-periphery": "1.1.0-beta.0",
     "viem": "2.39.0"
   },
   "devDependencies": {
-    "solc": "^0.8.28",
-    "tsx": "^4.x",
     "@types/node": "^20.x",
     "dotenv": "^16.x",
+    "solc": "^0.8.28",
+    "solc-0-5": "npm:solc@0.5.16",
+    "solc-0-6": "npm:solc@0.6.6",
+    "tsx": "^4.x",
     "vitest": "^4.0.18"
   }
 }

@@ -78,7 +78,7 @@ describe('AgentAttestationRegistry', () => {
       chain: foundry,
       transport: http(ANVIL_URL),
     });
-    const { abi, bytecode } = compileContract(
+    const { abi, bytecode } = await compileContract(
       'AgentAttestationRegistry.sol',
       'AgentAttestationRegistry',
     );

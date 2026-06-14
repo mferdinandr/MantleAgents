@@ -1,22 +1,62 @@
-// compile.ts — compiles a .sol file with solc and returns ABI + bytecode
-// for deployment via viem.
+// compile.ts — compiles Solidity contracts with local import resolution and
+// the correct solc version for each contract family.
 
 import fs from 'node:fs';
 import path from 'node:path';
-import solc from 'solc';
+import solcLatest from 'solc';
+import solc05 from 'solc-0-5';
+import solc06 from 'solc-0-6';
 
 export interface CompiledContract {
   abi: any[];
   bytecode: `0x${string}`;
 }
 
-export function compileContract(
+type SolcCompiler = {
+  compile(input: string, callbacks?: { import: (importPath: string) => { contents?: string; error?: string } }): string;
+};
+
+const contractsDir = path.resolve(import.meta.dirname, '..', 'contracts');
+const packageDir = path.resolve(import.meta.dirname, '..');
+
+function readContractSource(contractFilename: string): string {
+  const fullPath = path.join(contractsDir, contractFilename);
+  return fs.readFileSync(fullPath, 'utf8');
+}
+
+function pickCompiler(source: string): SolcCompiler {
+  if (source.includes('pragma solidity =0.5.16;')) {
+    return solc05 as unknown as SolcCompiler;
+  }
+
+  if (source.includes('pragma solidity =0.6.6;')) {
+    return solc06 as unknown as SolcCompiler;
+  }
+
+  return solcLatest as unknown as SolcCompiler;
+}
+
+function resolveImport(importPath: string): { contents?: string; error?: string } {
+  const candidates = [
+    path.resolve(contractsDir, importPath),
+    path.resolve(packageDir, 'node_modules', importPath),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      return { contents: fs.readFileSync(candidate, 'utf8') };
+    }
+  }
+
+  return { error: `File not found: ${importPath}` };
+}
+
+export async function compileContract(
   contractFilename: string,
   contractName: string,
-): CompiledContract {
-  const contractsDir = path.resolve(import.meta.dirname, '..', 'contracts');
-  const fullPath = path.join(contractsDir, contractFilename);
-  const source = fs.readFileSync(fullPath, 'utf8');
+): Promise<CompiledContract> {
+  const source = readContractSource(contractFilename);
+  const compiler = pickCompiler(source);
 
   const input = {
     language: 'Solidity',
@@ -33,7 +73,11 @@ export function compileContract(
     },
   };
 
-  const output = JSON.parse(solc.compile(JSON.stringify(input)));
+  const output = JSON.parse(
+    compiler.compile(JSON.stringify(input), {
+      import: resolveImport,
+    }),
+  );
 
   if (output.errors) {
     const fatal = output.errors.filter((e: any) => e.severity === 'error');

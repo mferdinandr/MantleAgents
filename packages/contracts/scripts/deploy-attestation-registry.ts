@@ -33,7 +33,10 @@ async function main() {
   console.log(`Deployer: ${account.address}`);
   console.log(`RPC:      ${RPC_URL} (chainId ${MANTLE_TESTNET_CHAIN.id})`);
 
-  const { abi, bytecode } = compileContract('AgentAttestationRegistry.sol', 'AgentAttestationRegistry');
+  const { abi, bytecode } = await compileContract(
+    'AgentAttestationRegistry.sol',
+    'AgentAttestationRegistry',
+  );
 
   console.log('\nDeploying AgentAttestationRegistry...');
   const hash = await walletClient.deployContract({ abi, bytecode, args: [] });

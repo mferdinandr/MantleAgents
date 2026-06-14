@@ -89,7 +89,7 @@ async function main() {
     );
   }
 
-  const { abi, bytecode } = compileContract('MockERC20.sol', 'MockERC20');
+  const { abi, bytecode } = await compileContract('MockERC20.sol', 'MockERC20');
 
   const results: Record<string, string> = {};
 
