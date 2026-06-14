@@ -138,15 +138,16 @@ TanStack Query v5 for data fetching with auto-refetch. WebSocket for real-time p
 ## Environment Variables
 
 **API** (`apps/api/.env.example`):
-- Required: `MARKETDATA_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `THIRDWEB_SECRET_KEY`
+- Required: `MARKETDATA_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+- Auth: `AUTH_DOMAIN` (SIWE domain), `JWT_SECRET` (JWT signing, HS256 — fail-loud if unset)
 - Mantle: `MANTLE_NETWORK`, `MANTLE_RPC_URL`, `MANTLE_IDENTITY_REGISTRY_ADDRESS`, `MANTLE_REPUTATION_REGISTRY_ADDRESS`, `MANTLE_ATTESTATION_REGISTRY_ADDRESS`, `MANTLE_USDC_ADDRESS`, `MANTLE_USDT_ADDRESS`, `MANTLE_WMNT_ADDRESS`
 - Mantle execution: `REALCLAW_API_BASE`, `REALCLAW_API_KEY`
-- Signing: `EVM_SIGNER_PRIVATE_KEY`, `SOLANA_SIGNER_PRIVATE_KEY`
+- Signing / relayer: `EVM_SIGNER_PRIVATE_KEY` (the relayer wallet — signs/broadcasts all on-chain execution txs and pays gas; must be funded with MNT), `SOLANA_SIGNER_PRIVATE_KEY`
 - AI: `PARALLEL_API_KEY` (news), `GEMINI_CLI_AUTH_TYPE`
 - Defaults: `PORT=4000`, `MARKETDATA_DEFAULT_CHAIN=bsc`, `CORS_ORIGIN=http://localhost:3000`
 
 **Web** (`apps/web/.env.local`):
-- `NEXT_PUBLIC_THIRDWEB_CLIENT_ID`, `NEXT_PUBLIC_API_URL` (default `http://localhost:4000`)
+- `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` (optional — enables the wagmi WalletConnect connector), `NEXT_PUBLIC_API_URL` (default `http://localhost:4000`)
 
 ## Database
 

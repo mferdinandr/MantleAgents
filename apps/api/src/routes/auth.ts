@@ -1,5 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import { thirdwebAuth } from '../lib/thirdweb.js';
+import {
+  buildSiwePayload,
+  verifySiweMessage,
+  issueJwt,
+  type SiwePayload,
+} from '../lib/auth.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { createSupabaseAdmin } from '@mantleagents/db';
 
@@ -10,35 +15,39 @@ const supabaseAdmin = createSupabaseAdmin(
 
 export async function authRoutes(app: FastifyInstance) {
   // Generate SIWE login payload
-  app.post('/api/auth/payload', async (request) => {
-    const { address } = request.body as { address: string };
-    const payload = await thirdwebAuth.generatePayload({ address });
-    return payload;
+  app.post('/api/auth/payload', async (request, reply) => {
+    const { address, chainId } = request.body as {
+      address?: string;
+      chainId?: number;
+    };
+    if (!address) {
+      return reply.status(400).send({ error: 'address is required' });
+    }
+    return buildSiwePayload({ address, chainId });
   });
 
-  // Verify signature and issue JWT
+  // Verify SIWE signature and issue JWT
   app.post('/api/auth/login', async (request, reply) => {
     const { payload, signature } = request.body as {
-      payload: unknown;
+      payload: SiwePayload;
       signature: string;
     };
 
-    const verifiedPayload = await thirdwebAuth.verifyPayload({
-      payload: payload as Parameters<
-        typeof thirdwebAuth.verifyPayload
-      >[0]['payload'],
+    if (!payload?.message || !signature) {
+      return reply.status(400).send({ error: 'payload and signature required' });
+    }
+
+    const result = await verifySiweMessage({
+      message: payload.message,
       signature,
     });
 
-    if (!verifiedPayload.valid) {
+    if (!result.valid || !result.address) {
       return reply.status(401).send({ error: 'Invalid signature' });
     }
 
-    const jwt = await thirdwebAuth.generateJWT({
-      payload: verifiedPayload.payload,
-    });
-
-    return { token: jwt };
+    const token = await issueJwt(result.address);
+    return { token };
   });
 
   // Get current user profile (protected)

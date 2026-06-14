@@ -7,7 +7,7 @@ import {
 } from "@mantleagents/shared";
 import type { FastifyInstance } from "fastify";
 import { chainClient } from "../lib/chain-client.js";
-import { createServerWallet } from "../lib/thirdweb-wallet.js";
+import { createServerWallet } from "../lib/relayer.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { runAgentCycle } from "../services/agent-cron.js";
 import {
@@ -271,7 +271,7 @@ export async function yieldAgentRoutes(app: FastifyInstance) {
 					.send({ error: "Yield agent already registered" });
 			}
 
-			// Create a separate server wallet for yield agent (thirdweb)
+			// Resolve the shared relayer wallet for the yield agent
 			const identifier = `agent-yield-${walletAddress.toLowerCase()}`;
 			let walletResult: { address: string };
 			try {

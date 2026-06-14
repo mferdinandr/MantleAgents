@@ -13,7 +13,7 @@ import {
   type FailureCategory,
   getTokenDecimals,
 } from '@mantleagents/shared';
-import { sendTransactionFromServerWallet } from '../lib/thirdweb-wallet.js';
+import { sendRelayerTransaction } from '../lib/relayer.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -85,7 +85,7 @@ async function ensureErc20Allowance(
     functionName: 'approve',
     args: [spender as `0x${string}`, maxUint256],
   });
-  await sendTransactionFromServerWallet(walletAddress, {
+  await sendRelayerTransaction({
     to: tokenAddress,
     data: approveData,
   });
@@ -302,7 +302,7 @@ export async function executeTrade(params: {
 
     await ensureErc20Allowance(inTokenAddress, serverWalletAddress, to, BigInt(inAmountRaw));
 
-    const txHash = await sendTransactionFromServerWallet(serverWalletAddress, {
+    const txHash = await sendRelayerTransaction({
       to,
       data,
       value: BigInt(value || '0'),
@@ -396,7 +396,7 @@ export async function executeSwap(params: {
 
     await ensureErc20Allowance(inTokenAddress, serverWalletAddress, created.txContent.to, BigInt(amount));
 
-    const txHash = await sendTransactionFromServerWallet(serverWalletAddress, {
+    const txHash = await sendRelayerTransaction({
       to: created.txContent.to,
       data: created.txContent.data,
       value: BigInt(created.txContent.value || '0'),
@@ -458,7 +458,7 @@ export async function sendTokens(params: {
     args: [recipient as `0x${string}`, amountUnits],
   });
 
-  const txHash = await sendTransactionFromServerWallet(serverWalletAddress, {
+  const txHash = await sendRelayerTransaction({
     to: tokenAddress as `0x${string}`,
     data,
   });

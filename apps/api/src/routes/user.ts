@@ -5,7 +5,7 @@ import { formatEther } from 'viem';
 import { MANTLE_NETWORK } from '../lib/chains.js';
 import { publicClient } from '../lib/chain-client.js';
 import { computeRiskScore, scoreToProfile } from '../lib/risk-scoring.js';
-import { createServerWallet } from '../lib/thirdweb-wallet.js';
+import { createServerWallet } from '../lib/relayer.js';
 import { DEFAULT_GUARDRAILS, type RiskAnswers, type RiskProfile } from '@mantleagents/shared';
 
 const supabaseAdmin = createSupabaseAdmin(
@@ -96,7 +96,7 @@ export async function userRoutes(app: FastifyInstance) {
         if (existingConfig?.server_wallet_id && existingConfig?.server_wallet_address) {
           serverWalletAddress = existingConfig.server_wallet_address;
         } else {
-          // Create new thirdweb server wallet (idempotent for same identifier)
+          // Resolve the shared relayer wallet for this agent
           const identifier = `agent-fx-${walletAddress.toLowerCase()}`;
           const wallet = await createServerWallet(identifier);
           serverWalletAddress = wallet.address;

@@ -1,5 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { thirdwebAuth } from '../lib/thirdweb.js';
+import { verifyJwt } from '../lib/auth.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -20,16 +20,12 @@ export async function authMiddleware(
 
   const jwt = authHeader.slice(7);
 
-  try {
-    const result = await thirdwebAuth.verifyJWT({ jwt });
-    if (!result.valid) {
-      return reply.status(401).send({ error: 'Invalid token' });
-    }
-
-    request.user = {
-      walletAddress: result.parsedJWT.sub,
-    };
-  } catch {
-    return reply.status(401).send({ error: 'Token verification failed' });
+  const result = await verifyJwt(jwt);
+  if (!result.valid || !result.sub) {
+    return reply.status(401).send({ error: 'Invalid token' });
   }
+
+  request.user = {
+    walletAddress: result.sub,
+  };
 }
