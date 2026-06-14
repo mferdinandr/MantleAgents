@@ -52,7 +52,7 @@ pnpm workspaces + Turborepo. Node 20 (`.nvmrc`). pnpm 9.15.0.
 Single source of truth for Mantle network config:
 - `MANTLE_NETWORK` env (`testnet` | `mainnet`) selects `mantleSepoliaTestnet` (5003) or `mantle` (5000)
 - `mantleRpcUrl()`, `mantleExplorerTxUrl()`, `mantleExplorerAddressUrl()` helpers
-- `getIdentityRegistryAddress()`, `getReputationRegistryAddress()`, `getAttestationRegistryAddress()`, `getMantleUsdc/Usdt/Wmnt()` — all read from env and **throw if unset** (fail-loud rather than silently using a wrong/guessed address)
+- `getIdentityRegistryAddress()`, `getReputationRegistryAddress()`, `getAttestationRegistryAddress()`, `getMantleUsdc/Usdt/Wmnt()`, `getMantleDexRouterAddress()`, `getMantleDexFactoryAddress()` — all read from env and **throw if unset** (fail-loud rather than silently using a wrong/guessed address)
 
 `apps/api/src/lib/chain-client.ts` exports a shared viem `PublicClient` for Mantle reads (vault sync, balance checks).
 
@@ -69,9 +69,9 @@ ABIs: `apps/api/src/abis/identity.ts`, `reputation.ts`.
 
 Per-run timeline events are canonicalized + hashed (`eventsHash`), HMAC-signed (`ATTESTATION_SECRET`), and stored in Supabase (`agent_attestations`). The hash + `runId` + `agentId` are committed to `AgentAttestationRegistry` on Mantle (`apps/api/src/abis/attestation-registry.ts`, contract source in `packages/contracts/contracts/AgentAttestationRegistry.sol`) so the run is independently verifiable on-chain.
 
-### Mantle Execution (`apps/api/src/services/realclaw-executor.ts`)
+### Mantle Execution (`apps/api/src/services/uniswap-swap.ts`)
 
-Mantle execution routes through **RealClaw / Byreal Skills CLI**, the agent layer that dispatches swaps to Merchant Moe / Agni Finance / Fluxion — non-custodial via Privy. `executeRealClawSwap()` calls `POST /api/skills/dex-swap` with Bearer token auth (see `docs/REALCLAW_API.md`); includes `pending_confirmation` polling (2s interval, 20s default timeout) and 5xx retry (up to 3×). `isRealClawConfigured()` validates both `REALCLAW_API_KEY` and `REALCLAW_API_BASE` at startup. `trade-executor.ts` routes Mantle trades to RealClaw when configured; emits `trade_skipped` when not configured.
+Mantle execution routes through a self-hosted **Uniswap V2 DEX** on Mantle Sepolia. `getUniswapQuote()` calls router `getAmountsOut` with a direct-path first pass and a WMNT-bridged fallback; `executeUniswapSwap()` ensures allowance, computes `amountOutMin`, and submits `swapExactTokensForTokens` through the relayer. `trade-executor.ts` routes Mantle trades through this DEX and only emits `trade_skipped` when the DEX env is not configured.
 
 ### Agent Execution Loop (`apps/api/src/services/agent-cron.ts`)
 
@@ -80,7 +80,7 @@ Mantle execution routes through **RealClaw / Byreal Skills CLI**, the agent laye
 2. Fetch market data (`price-service.ts`, Merkl for yield)
 3. Generate signals with Gemini 2.5 Flash (`llm-analyzer.ts`)
 4. Validate signals against guardrails (`rules-engine.ts`)
-5. Execute trades (`trade-executor.ts` → Mantle via `realclaw-executor.ts`, or `@mantleagents/mantle-data` for non-Mantle chains)
+5. Execute trades (`trade-executor.ts` → Mantle via `uniswap-swap.ts`, or `@mantleagents/mantle-data` for non-Mantle chains)
 6. Log events to `agent_timeline`; commit attestation (`attestation-service.ts`)
 
 ### Token Monitor (`apps/api/src/services/token-monitor.ts`)
@@ -95,7 +95,7 @@ Mantle execution routes through **RealClaw / Byreal Skills CLI**, the agent laye
 - `executeTrade()` -- agent-driven trades (currency + direction + amount)
 - `executeSwap()` -- manual swaps (arbitrary from/to pair)
 - `signTransaction` callback pattern keeps private keys isolated
-- Mantle trades route to `realclaw-executor.ts`; non-Mantle chains use `@mantleagents/mantle-data`'s `trade-chain-wallet`
+- Mantle trades route to `uniswap-swap.ts`; non-Mantle chains use `@mantleagents/mantle-data`'s `trade-chain-wallet`
 
 ### Market Data SDK (`packages/mantle-data`)
 
@@ -141,7 +141,7 @@ TanStack Query v5 for data fetching with auto-refetch. WebSocket for real-time p
 - Required: `MARKETDATA_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 - Auth: `AUTH_DOMAIN` (SIWE domain), `JWT_SECRET` (JWT signing, HS256 — fail-loud if unset)
 - Mantle: `MANTLE_NETWORK`, `MANTLE_RPC_URL`, `MANTLE_IDENTITY_REGISTRY_ADDRESS`, `MANTLE_REPUTATION_REGISTRY_ADDRESS`, `MANTLE_ATTESTATION_REGISTRY_ADDRESS`, `MANTLE_USDC_ADDRESS`, `MANTLE_USDT_ADDRESS`, `MANTLE_WMNT_ADDRESS`
-- Mantle execution: `REALCLAW_API_BASE`, `REALCLAW_API_KEY`
+- Mantle execution: `MANTLE_DEX_ROUTER_ADDRESS`, `MANTLE_DEX_FACTORY_ADDRESS`
 - Signing / relayer: `EVM_SIGNER_PRIVATE_KEY` (the relayer wallet — signs/broadcasts all on-chain execution txs and pays gas; must be funded with MNT), `SOLANA_SIGNER_PRIVATE_KEY`
 - AI: `PARALLEL_API_KEY` (news), `GEMINI_CLI_AUTH_TYPE`
 - Defaults: `PORT=4000`, `MARKETDATA_DEFAULT_CHAIN=bsc`, `CORS_ORIGIN=http://localhost:3000`

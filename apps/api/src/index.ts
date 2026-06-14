@@ -19,8 +19,8 @@ import { marketplaceRoutes } from './routes/marketplace.js';
 import { systemRoutes } from './routes/system.js';
 import { startPriceSnapshotCron } from './services/snapshot-cron.js';
 import { startAgentCron } from './services/agent-cron.js';
-import { isRealClawConfigured } from './services/realclaw-executor.js';
 import { startMonitorCron } from './services/token-monitor.js';
+import { isMantleDexConfigured } from './lib/chains.js';
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
 
@@ -116,8 +116,8 @@ try {
   startPriceSnapshotCron();
   startAgentCron();
   startMonitorCron();
-  if (isRealClawConfigured()) {
-    console.log('[realclaw] RealClaw execution active — Mantle trades will route to RealClaw');
+  if (isMantleDexConfigured()) {
+    console.log('[uniswap-v2] Mantle DEX execution active');
   }
 } catch (err) {
   app.log.error(err);

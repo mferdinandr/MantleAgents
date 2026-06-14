@@ -4,30 +4,30 @@ import { describe, expect, it } from 'vitest';
 import { StatusBadge } from './status-badge';
 
 describe('StatusBadge', () => {
-  it('shows a warning badge when RealClaw is not configured', () => {
+  it('shows a warning badge when the Mantle DEX is not configured', () => {
     render(
       createElement(StatusBadge, {
-        realClawConfigured: false,
-        custodyLabel: 'Non-custodial via Privy/RealClaw',
+        dexConfigured: false,
+        custodyLabel: 'Non-custodial via relayer',
       }),
     );
 
-    const badge = screen.getByTestId('realclaw-status-badge');
-    expect(badge).toHaveTextContent('RealClaw Not Configured');
+    const badge = screen.getByTestId('dex-status-badge');
+    expect(badge).toHaveTextContent('Mantle DEX Missing');
     expect(badge).toHaveClass('border-amber-500/70');
     expect(badge).toHaveClass('text-amber-800');
   });
 
-  it('shows a success badge when RealClaw is connected', () => {
+  it('shows a success badge when the Mantle DEX is configured', () => {
     render(
       createElement(StatusBadge, {
-        realClawConfigured: true,
-        custodyLabel: 'Non-custodial via Privy/RealClaw',
+        dexConfigured: true,
+        custodyLabel: 'Non-custodial via relayer',
       }),
     );
 
-    const badge = screen.getByTestId('realclaw-status-badge');
-    expect(badge).toHaveTextContent('RealClaw Connected');
+    const badge = screen.getByTestId('dex-status-badge');
+    expect(badge).toHaveTextContent('Mantle DEX Ready');
     expect(badge).toHaveClass('border-emerald-500/60');
     expect(badge).toHaveClass('text-emerald-700');
   });
@@ -35,8 +35,8 @@ describe('StatusBadge', () => {
   it('always shows the non-custodial custody badge', () => {
     render(
       createElement(StatusBadge, {
-        realClawConfigured: true,
-        custodyLabel: 'Non-custodial via Privy/RealClaw',
+        dexConfigured: true,
+        custodyLabel: 'Non-custodial via relayer',
       }),
     );
 

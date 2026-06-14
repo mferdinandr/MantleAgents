@@ -5,7 +5,6 @@ import {
   getAmountOut,
   createEvmTx,
 } from '@mantleagents/mantle-data';
-import { executeRealClawSwap, isRealClawConfigured } from './realclaw-executor.js';
 import { encodeFunctionData, parseUnits, maxUint256 } from 'viem';
 import {
   ALL_TOKEN_ADDRESSES,
@@ -14,6 +13,11 @@ import {
   getTokenDecimals,
 } from '@mantleagents/shared';
 import { sendRelayerTransaction } from '../lib/relayer.js';
+import { executeUniswapSwap } from './uniswap-swap.js';
+import {
+  findMantleTokenByAddress,
+  isMantleDexConfigured,
+} from '../lib/chains.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -144,7 +148,7 @@ function toFailureResult(error: unknown): Extract<TradeResult, { success: false 
 }
 
 // ---------------------------------------------------------------------------
-// Mantle / RealClaw trade path
+// Mantle / DEX trade path
 // ---------------------------------------------------------------------------
 
 type MantelTradeParams = {
@@ -152,21 +156,44 @@ type MantelTradeParams = {
   currency?: string;
   direction?: string;
   amountUsd?: number;
+  amountRaw?: string;
   inTokenAddress?: string;
   outTokenAddress?: string;
   slippageBps?: string;
 };
 
+function getMantleTokenDecimals(
+  tokenAddress: string,
+  fallbackSymbol?: string,
+): number {
+  try {
+    const token = findMantleTokenByAddress(tokenAddress);
+    if (token) return token.decimals;
+  } catch {
+    // Fall back to symbol metadata when env-backed lookup is unavailable.
+  }
+
+  return fallbackSymbol ? getTokenDecimals(fallbackSymbol) : 18;
+}
+
 async function executeMantle(params: MantelTradeParams): Promise<TradeResult> {
-  if (!isRealClawConfigured()) {
+  if (!isMantleDexConfigured()) {
     return {
       success: false,
       failureCategory: 'skipped',
-      reason: 'RealClaw not configured',
+      reason: 'Mantle DEX not configured',
     };
   }
 
-  const { serverWalletAddress, inTokenAddress, outTokenAddress, amountUsd, slippageBps } = params;
+  const {
+    currency,
+    direction,
+    amountUsd,
+    amountRaw,
+    inTokenAddress,
+    outTokenAddress,
+    slippageBps,
+  } = params;
 
   if (!inTokenAddress || !outTokenAddress) {
     return {
@@ -176,44 +203,37 @@ async function executeMantle(params: MantelTradeParams): Promise<TradeResult> {
     };
   }
 
-  const inAmountRaw = BigInt(Math.floor((amountUsd ?? 0) * 1e18)).toString();
+  const amountIn =
+    amountRaw != null
+      ? BigInt(amountRaw)
+      : parseUnits(
+          String(amountUsd ?? 0),
+          getMantleTokenDecimals(
+            inTokenAddress,
+            direction === 'buy' ? 'USDT' : currency,
+          ),
+        );
   const slippageBpsNum = slippageBps != null ? parseInt(slippageBps, 10) : 100;
 
   console.log(
-    `[realclaw] Executing swap on Mantle: ${inTokenAddress} → ${outTokenAddress}, amount=${inAmountRaw}`,
+    `[uniswap-v2] Executing swap on Mantle: ${inTokenAddress} → ${outTokenAddress}, amount=${amountIn}`,
   );
 
-  const result = await executeRealClawSwap({
-    walletAddress: serverWalletAddress,
+  const result = await executeUniswapSwap({
     tokenIn: inTokenAddress as `0x${string}`,
     tokenOut: outTokenAddress as `0x${string}`,
-    amountIn: inAmountRaw,
+    amountIn,
     slippageBps: slippageBpsNum,
   });
 
-  if (result.status === 'success') {
-    console.log(`[realclaw] Success: txHash=${result.txHash}`);
-    return {
-      success: true,
-      txHash: result.txHash,
-      amountIn: inAmountRaw,
-      amountOut: result.amountOut,
-      rate: 0,
-    };
-  }
-
-  if (result.status === 'pending_confirmation') {
-    return {
-      success: false,
-      failureCategory: 'pending_confirmation',
-      reason: `pending_confirmation: ${result.reason}`,
-    };
-  }
+  console.log(`[uniswap-v2] Success: txHash=${result.txHash}`);
 
   return {
-    success: false,
-    failureCategory: mapFailureCategory(result.reason),
-    reason: result.reason,
+    success: true,
+    txHash: result.txHash,
+    amountIn: result.amountIn.toString(),
+    amountOut: result.amountOut.toString(),
+    rate: Number(result.amountOut) / Math.max(Number(result.amountIn), 1),
   };
 }
 
@@ -222,8 +242,8 @@ async function executeMantle(params: MantelTradeParams): Promise<TradeResult> {
 // ---------------------------------------------------------------------------
 
 /**
- * Execute a trade. Mantle trades route to RealClaw when configured; all other
- * chains use the AVE DEX aggregation path.
+ * Execute a trade. Mantle trades route to the self-hosted Uniswap V2 DEX; all
+ * other chains use the AVE DEX aggregation path.
  */
 export async function executeTrade(params: {
   serverWalletId: string;
@@ -236,10 +256,14 @@ export async function executeTrade(params: {
   outTokenAddress?: string;
   slippageBps?: string;
 }): Promise<TradeResult> {
-  const chain = params.chain ?? 'bsc';
+  const chain = params.chain ?? 'mantle';
 
   if (chain === 'mantle') {
-    return executeMantle(params);
+    try {
+      return await executeMantle(params);
+    } catch (error) {
+      return toFailureResult(error);
+    }
   }
 
   try {
@@ -328,7 +352,8 @@ export async function executeTrade(params: {
 
 /**
  * Execute a manual swap for an arbitrary token pair.
- * Mantle swaps route to RealClaw; other chains use AVE DEX aggregation.
+ * Mantle swaps route to the self-hosted Uniswap V2 DEX; other chains use AVE
+ * DEX aggregation.
  */
 export async function executeSwap(params: {
   serverWalletId: string;
@@ -341,15 +366,34 @@ export async function executeSwap(params: {
   inTokenAddress?: string;
   outTokenAddress?: string;
 }): Promise<TradeResult> {
-  if ((params.chain ?? 'bsc') === 'mantle') {
-    return executeMantle({
-      serverWalletAddress: params.serverWalletAddress,
-      currency: params.from,
-      direction: 'buy',
-      inTokenAddress: params.inTokenAddress,
-      outTokenAddress: params.outTokenAddress,
-      slippageBps: params.slippagePct != null ? String(Math.round(params.slippagePct * 100)) : undefined,
-    });
+  if ((params.chain ?? 'mantle') === 'mantle') {
+    try {
+      if (!params.inTokenAddress || !params.outTokenAddress) {
+        throw new Error(
+          `Token addresses required: inTokenAddress and outTokenAddress must be provided for ${params.from} → ${params.to}`,
+        );
+      }
+
+      const amountUnits = parseUnits(
+        params.amount,
+        getMantleTokenDecimals(params.inTokenAddress, params.from),
+      );
+
+      return await executeMantle({
+        serverWalletAddress: params.serverWalletAddress,
+        currency: params.from,
+        direction: 'buy',
+        amountRaw: amountUnits.toString(),
+        inTokenAddress: params.inTokenAddress,
+        outTokenAddress: params.outTokenAddress,
+        slippageBps:
+          params.slippagePct != null
+            ? String(Math.round(params.slippagePct * 100))
+            : undefined,
+      });
+    } catch (error) {
+      return toFailureResult(error);
+    }
   }
 
   try {

@@ -1,11 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import { MANTLE_NETWORK } from '../lib/chains.js';
-import { isRealClawConfigured } from '../services/realclaw-executor.js';
+import { isMantleDexConfigured, MANTLE_NETWORK } from '../lib/chains.js';
 
 export async function systemRoutes(app: FastifyInstance) {
   app.get('/api/system/status', async () => {
     return {
-      realClawConfigured: isRealClawConfigured(),
+      dexConfigured: isMantleDexConfigured(),
       network: MANTLE_NETWORK,
     };
   });

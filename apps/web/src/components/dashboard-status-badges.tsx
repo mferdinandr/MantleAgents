@@ -5,7 +5,7 @@ import { api } from '@/lib/api-client';
 import { StatusBadge } from '@/components/status-badge';
 
 interface SystemStatusResponse {
-  realClawConfigured: boolean;
+  dexConfigured: boolean;
   network: 'testnet' | 'mainnet';
 }
 
@@ -18,8 +18,8 @@ export function DashboardStatusBadges() {
 
   return (
     <StatusBadge
-      realClawConfigured={data?.realClawConfigured ?? false}
-      custodyLabel="Non-custodial via Privy/RealClaw"
+      dexConfigured={data?.dexConfigured ?? false}
+      custodyLabel="Non-custodial via relayer"
     />
   );
 }

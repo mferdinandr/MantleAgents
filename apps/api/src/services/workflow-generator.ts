@@ -84,7 +84,7 @@ const AVAILABLE_NODES = [
   {
     name: 'Execute Trade',
     endpoint: '/api/n8n/execute-trade',
-    description: 'Execute a swap on-chain (Mantle via RealClaw, other chains via AVE)',
+    description: 'Execute a swap on-chain (Mantle via self-hosted Uniswap V2, other chains via AVE)',
     inputs: ['walletAddress', 'serverWalletId', 'serverWalletAddress', 'currency', 'direction', 'amountUsd', 'chain', 'inTokenAddress', 'outTokenAddress'],
     outputs: ['success', 'txHash', 'amountIn', 'amountOut'],
   },

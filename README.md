@@ -33,11 +33,11 @@ Contract sources, deploy scripts, and verification: [`packages/contracts`](./pac
 - **Agent identity (ERC-8004)** — every FX/Yield agent registers on-chain via `IdentityRegistry.register()`, minting an agent NFT and linking the agent's execution wallet (`apps/api/src/services/agent-registry.ts`).
 - **Reputation** — trade outcomes are submitted to `ReputationRegistry.giveFeedback()`, building an on-chain track record per agent.
 - **On-chain attestations** — each agent run commits two hashes to `AgentAttestationRegistry`: `eventsHash` (SHA-256 of the full timeline) and `decisionHash` (SHA-256 of the LLM signal + guardrail params + market snapshot that drove the decision). Both are stored in Supabase and anchored on-chain via `commitAttestation()`, with the resulting `commitTxHash` surfaced in the dashboard's "Verified on-chain" badge. See `apps/api/src/services/attestation-service.ts`.
-- **Mantle-native execution (in progress)** — Mantle swaps are routed through **RealClaw / Byreal Skills CLI**, the agent layer that sits in front of Merchant Moe / Agni Finance / Fluxion. The integration is scaffolded in `apps/api/src/services/realclaw-executor.ts`. Non-Mantle chains continue to use the existing market-data/execution SDK described below.
+- **Mantle-native execution (live on Sepolia)** — Mantle swaps are routed through a self-hosted **Uniswap V2 DEX** deployed and seeded on Mantle Sepolia, then executed by the relayer in `apps/api/src/services/uniswap-swap.ts`. Non-Mantle chains continue to use the existing market-data/execution SDK described below.
 
 ### Custody Model
 
-Agent execution on Mantle is non-custodial via Privy through RealClaw. When agents auto-execute swaps, the platform routes the request through the Privy-managed execution flow and never stores or has access to users' raw private keys.
+Agent execution on Mantle uses a self-hosted relayer wallet plus a self-hosted Uniswap V2 DEX. The platform never asks users for raw private keys; execution-layer transactions are signed by the relayer configured in `EVM_SIGNER_PRIVATE_KEY`.
 
 ## Architecture
 
@@ -62,7 +62,7 @@ graph TB
         IDREG[ERC-8004 IdentityRegistry]
         REPREG[ERC-8004 ReputationRegistry]
         ATTESTREG[AgentAttestationRegistry]
-        REALCLAW[RealClaw / Byreal Skills CLI]
+        DEX[Self-hosted Uniswap V2 DEX]
         TOKENS[mUSDC / mUSDT / mWMNT]
     end
 
@@ -84,8 +84,8 @@ graph TB
     CRON_AGENT --> LLM
     LLM --> RULES
     RULES --> TRADE
-    TRADE -->|Mantle execution| REALCLAW
-    REALCLAW --> TOKENS
+    TRADE -->|Mantle execution| DEX
+    DEX --> TOKENS
 
     API -->|register / link wallet| IDREG
     TRADE -->|trade feedback| REPREG
@@ -105,7 +105,7 @@ graph TB
 
 - 🔍 **Token Monitoring** — Watchlist, configurable price alerts, automated risk scoring (`apps/api/src/services/token-monitor.ts`)
 - 🤖 **AI-Driven Signals** — Gemini 2.5 Flash analyzes market data + parallel news feeds to generate buy/sell/hold signals with confidence scores (0-100)
-- ⚡ **On-Chain Execution** — Trades route through Mantle via RealClaw / Byreal Skills CLI
+- ⚡ **On-Chain Execution** — Trades route through Mantle via a self-hosted Uniswap V2 DEX
 - 🆔 **ERC-8004 Agent Identity** — Every agent is an on-chain identity NFT with a linked execution wallet
 - 📜 **On-Chain Attestations** — Every agent run's events are hashed and committed to `AgentAttestationRegistry` on Mantle
 - 🛡️ **Smart Guardrails** — Daily trade limits, max allocation per token, max trade size caps, stop-loss protection
@@ -120,7 +120,7 @@ graph TB
 | Backend | Fastify v5, TypeScript, Node.js 20 |
 | AI | Gemini 2.5 Flash (via Vercel AI SDK) |
 | On-chain (Mantle) | viem, ERC-8004 (Identity + Reputation), custom AgentAttestationRegistry |
-| Mantle Execution | RealClaw / Byreal Skills CLI |
+| Mantle Execution | Self-hosted Uniswap V2 + relayer |
 | Market Data | `@mantleagents/mantle-data` SDK + Merkl (yield) |
 | Database | Supabase (PostgreSQL + Row Level Security) |
 | Auth | SIWE (Sign-In With Ethereum, `siwe`) + JWT (`jose`); wallet connect via wagmi |
@@ -165,12 +165,13 @@ The API server runs on `http://localhost:4000` and the web app on `http://localh
 
 ### Roadmap: Account Abstraction / Gasless UX
 
-MantleAgents is currently non-custodial via Privy/RealClaw for trading execution: the platform routes actions through the agent execution layer and never stores raw user private keys. On-chain execution-layer transactions (ERC-8004 registration, attestations, swaps, yield) are broadcast by a single self-hosted relayer wallet (`EVM_SIGNER_PRIVATE_KEY`) that pays their gas. Account Abstraction is planned, not yet implemented. The intended extension is to add a Mantle paymaster for non-trading actions such as publishing strategies, updating guardrails, and committing configuration changes, so users can complete routine agent-management actions without manually holding gas for every update.
+MantleAgents currently uses a self-hosted relayer wallet (`EVM_SIGNER_PRIVATE_KEY`) for trading execution: the platform never stores raw user private keys, and on-chain execution-layer transactions (ERC-8004 registration, attestations, swaps, yield) are broadcast by that relayer, which pays gas. Account Abstraction is planned, not yet implemented. The intended extension is to add a Mantle paymaster for non-trading actions such as publishing strategies, updating guardrails, and committing configuration changes, so users can complete routine agent-management actions without manually holding gas for every update.
 
 ### Deploying / Re-deploying Contracts
 
 ```bash
 pnpm --filter @mantleagents/contracts deploy:tokens                 # mUSDC / mUSDT / mWMNT
+pnpm --filter @mantleagents/contracts deploy:dex                    # Uniswap V2 Factory / Router + seeded pools
 pnpm --filter @mantleagents/contracts deploy:attestation-registry   # AgentAttestationRegistry
 pnpm --filter @mantleagents/contracts verify:registries             # sanity-check addresses in .env
 ```
@@ -187,8 +188,8 @@ pnpm --filter @mantleagents/contracts verify:registries             # sanity-che
 | `MANTLE_REPUTATION_REGISTRY_ADDRESS` | ERC-8004 ReputationRegistry address |
 | `MANTLE_ATTESTATION_REGISTRY_ADDRESS` | AgentAttestationRegistry address |
 | `MANTLE_USDC_ADDRESS` / `MANTLE_USDT_ADDRESS` / `MANTLE_WMNT_ADDRESS` | Mock token addresses (testnet) |
+| `MANTLE_DEX_ROUTER_ADDRESS` / `MANTLE_DEX_FACTORY_ADDRESS` | Self-hosted Uniswap V2 deployment used for Mantle swaps |
 | `EVM_SIGNER_PRIVATE_KEY` | Server signer key for Mantle on-chain registration & transactions |
-| `REALCLAW_API_BASE` / `REALCLAW_API_KEY` | RealClaw / Byreal Skills CLI execution layer for Mantle swaps |
 
 ### n8n Orchestration (`apps/api/.env`)
 
@@ -233,7 +234,7 @@ mantleagents/
 │   │   │   │   ├── price-service.ts        # Market data feeds + cache
 │   │   │   │   ├── agent-registry.ts       # ERC-8004 register / reputation (Mantle)
 │   │   │   │   ├── attestation-service.ts  # On-chain run attestations
-│   │   │   │   ├── realclaw-executor.ts    # Mantle execution via RealClaw agent layer
+│   │   │   │   ├── uniswap-swap.ts         # Mantle execution via self-hosted Uniswap V2
 │   │   │   │   ├── trade-executor.ts       # Multi-chain DEX trading
 │   │   │   │   ├── agent-cron.ts           # 60s agent execution loop
 │   │   │   │   ├── rules-engine.ts         # Trading guardrails
@@ -276,7 +277,7 @@ mantleagents/
 
 - ✅ ERC-8004 identity + reputation live on Mantle Sepolia
 - ✅ AgentAttestationRegistry deployed; `attestation-service.ts` wiring to commit on-chain in progress
-- 🚧 RealClaw/Byreal Skills CLI execution path (`realclaw-executor.ts`) — interface scaffolded, pending API integration
+- ✅ Self-hosted Mantle Sepolia Uniswap V2 execution path (`uniswap-swap.ts`) — quote + relayer swap live
 - 🚧 Yield vault adapters for Mantle-native vaults
 
 ## Team

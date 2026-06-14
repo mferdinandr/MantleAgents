@@ -2,27 +2,27 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
 interface StatusBadgeProps {
-  realClawConfigured: boolean;
+  dexConfigured: boolean;
   custodyLabel: string;
 }
 
 export function StatusBadge({
-  realClawConfigured,
+  dexConfigured,
   custodyLabel,
 }: StatusBadgeProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Badge
         variant="outline"
-        data-testid="realclaw-status-badge"
+        data-testid="dex-status-badge"
         className={cn(
           'rounded-none border-2 px-2.5 py-1 font-vt323 text-base uppercase',
-          realClawConfigured
+          dexConfigured
             ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-700'
             : 'border-amber-500/70 bg-amber-400/20 text-amber-800',
         )}
       >
-        {realClawConfigured ? 'RealClaw Connected' : 'RealClaw Not Configured'}
+        {dexConfigured ? 'Mantle DEX Ready' : 'Mantle DEX Missing'}
       </Badge>
       <Badge
         variant="outline"

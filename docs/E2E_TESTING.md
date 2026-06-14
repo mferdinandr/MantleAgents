@@ -41,7 +41,7 @@ Pastikan sebelum mulai:
 - [ ] Klik "Start Agent" / toggle aktif
 - [ ] Tunggu max 60 detik untuk agent tick pertama
 - [ ] Timeline muncul event: `decision_input`, `signal`, `guardrail_check`
-- [ ] Jika trade terjadi: event `trade` atau `trade_skipped` muncul
+- [ ] Jika trade terjadi: event `trade` muncul dengan tx hash swap Mantle Sepolia
 - [ ] Attestation muncul di timeline dengan `eventsHash`
 
 ---
@@ -73,8 +73,8 @@ Pastikan sebelum mulai:
 
 - [ ] Pilih token dari/ke
 - [ ] Masukkan amount
-- [ ] Preview swap muncul
-- [ ] (Opsional) Execute swap jika wallet punya balance
+- [ ] Preview swap muncul dari `/api/trade/quote`
+- [ ] Execute swap menghasilkan tx hash dan transaksi terlihat di explorer Mantle Sepolia
 
 ---
 
@@ -165,5 +165,4 @@ Setelah agent run terjadi:
 
 ## Known Limitations (tidak perlu di-test)
 
-- Trade execution di-skip (`trade_skipped`) karena RealClaw tidak tersedia
 - Mock tokens (mUSDC, mUSDT, mWMNT) tidak punya harga di CoinGecko — normal

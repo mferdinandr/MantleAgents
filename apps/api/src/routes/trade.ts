@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { erc20Abi, formatUnits, parseUnits, type Address } from 'viem';
 import { authMiddleware } from '../middleware/auth.js';
 import { createSupabaseAdmin, type Database } from '@mantleagents/db';
 import {
@@ -7,6 +8,12 @@ import {
   COMMODITY_TOKENS,
 } from '@mantleagents/shared';
 import { executeSwap, sendTokens } from '../services/trade-executor.js';
+import { getUniswapQuote } from '../services/uniswap-swap.js';
+import { chainClient } from '../lib/chain-client.js';
+import {
+  findMantleTokenByAddress,
+  getMantleTokenBySymbol,
+} from '../lib/chains.js';
 
 const supabaseAdmin = createSupabaseAdmin(
   process.env.SUPABASE_URL!,
@@ -36,14 +43,85 @@ function isValidTxHash(hash: string): boolean {
   return /^0x[a-fA-F0-9]{64}$/.test(hash);
 }
 
+type ResolvedMantleToken = {
+  symbol: string;
+  address: Address;
+  decimals: number;
+};
+
+function resolveMantleToken(input: string | undefined): ResolvedMantleToken | null {
+  if (!input) return null;
+
+  if (/^0x[a-fA-F0-9]{40}$/.test(input)) {
+    const byAddress = findMantleTokenByAddress(input);
+    if (!byAddress) return null;
+    return byAddress;
+  }
+
+  const bySymbol = getMantleTokenBySymbol(input);
+  if (!bySymbol) return null;
+  return bySymbol;
+}
+
 export async function tradeRoutes(app: FastifyInstance) {
   // POST /api/trade/quote
-  // TODO: implement multi-chain logic (was using DEX broker getQuote/checkAllowance/buildSwapInTxs)
   app.post(
     '/api/trade/quote',
     { preHandler: authMiddleware },
-    async (_request, reply) => {
-      return reply.status(501).send({ error: 'Quote endpoint not yet implemented for multi-chain' });
+    async (request, reply) => {
+      const body = request.body as {
+        from?: string;
+        to?: string;
+        amount?: string;
+        slippage?: number;
+        tokenIn?: string;
+        tokenOut?: string;
+        amountIn?: string;
+      };
+
+      const tokenIn = resolveMantleToken(body.tokenIn ?? body.from);
+      const tokenOut = resolveMantleToken(body.tokenOut ?? body.to);
+      const amount = body.amountIn ?? body.amount;
+      const slippagePct = body.slippage ?? 0.5;
+
+      if (!tokenIn || !tokenOut || !amount || Number(amount) <= 0) {
+        return reply.status(400).send({
+          error: 'Valid token pair and positive amount are required',
+        });
+      }
+
+      try {
+        const amountIn = parseUnits(amount, tokenIn.decimals);
+        const quote = await getUniswapQuote({
+          tokenIn: tokenIn.address,
+          tokenOut: tokenOut.address,
+          amountIn,
+        });
+
+        if (!quote) {
+          return reply.status(404).send({
+            error: 'No route or liquidity available for this pair',
+          });
+        }
+
+        const minimumAmountOut =
+          (quote.amountOut * BigInt(10_000 - Math.round(slippagePct * 100))) / 10_000n;
+
+        return {
+          estimatedAmountOut: formatUnits(quote.amountOut, tokenOut.decimals),
+          minimumAmountOut: formatUnits(minimumAmountOut, tokenOut.decimals),
+          exchangeRate:
+            (Number(formatUnits(quote.amountOut, tokenOut.decimals)) /
+              Math.max(Number(amount), Number.EPSILON)).toFixed(6),
+          priceImpact: 0,
+          path: quote.path,
+        };
+      } catch (error) {
+        request.log.error({ err: error }, '[trade] quote failed');
+        return reply.status(500).send({
+          error: error instanceof Error ? error.message : 'Failed to quote trade',
+        });
+      }
     },
   );
 
@@ -271,6 +349,9 @@ export async function tradeRoutes(app: FastifyInstance) {
           to,
           amount,
           slippagePct: slippage,
+          chain: 'mantle',
+          inTokenAddress: resolveMantleToken(from)?.address,
+          outTokenAddress: resolveMantleToken(to)?.address,
         });
 
         if (!result.success) {
@@ -316,12 +397,55 @@ export async function tradeRoutes(app: FastifyInstance) {
   );
 
   // GET /api/trade/balance
-  // TODO: implement multi-chain logic (was using getErc20Balance + chain client)
   app.get(
     '/api/trade/balance',
     { preHandler: authMiddleware },
-    async (_request, reply) => {
-      return reply.status(501).send({ error: 'Balance endpoint not yet implemented for multi-chain' });
+    async (request, reply) => {
+      const walletAddress = request.user!.walletAddress;
+      const query = request.query as {
+        token?: string;
+        agent_type?: 'fx' | 'yield';
+      };
+
+      const token = resolveMantleToken(query.token);
+      if (!token) {
+        return reply.status(400).send({ error: 'Unsupported Mantle token' });
+      }
+
+      const agentType = query.agent_type === 'yield' ? 'yield' : 'fx';
+
+      try {
+        const { data: agent, error: agentError } = await supabaseAdmin
+          .from('agent_configs')
+          .select('server_wallet_address')
+          .eq('wallet_address', walletAddress)
+          .eq('agent_type', agentType)
+          .maybeSingle();
+
+        if (agentError || !agent?.server_wallet_address) {
+          return reply.status(404).send({
+            error: `${agentType === 'yield' ? 'Yield' : 'FX'} agent wallet not configured. Complete onboarding first.`,
+          });
+        }
+
+        const balance = await chainClient.readContract({
+          address: token.address,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [agent.server_wallet_address as Address],
+        });
+
+        return {
+          balance: Number(formatUnits(balance, token.decimals)),
+          rawBalance: balance.toString(),
+          decimals: token.decimals,
+        };
+      } catch (error) {
+        request.log.error({ err: error }, '[trade] balance failed');
+        return reply.status(500).send({
+          error: error instanceof Error ? error.message : 'Failed to fetch balance',
+        });
+      }
     },
   );
 

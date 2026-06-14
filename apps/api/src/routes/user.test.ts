@@ -4,12 +4,12 @@ import { systemRoutes } from './system';
 
 const {
   mockGetBalance,
-  mockIsRealClawConfigured,
+  mockIsMantleDexConfigured,
   mockSupabaseClient,
 } = vi.hoisted(() => {
   return {
     mockGetBalance: vi.fn(),
-    mockIsRealClawConfigured: vi.fn(),
+    mockIsMantleDexConfigured: vi.fn(),
     mockSupabaseClient: {
       from: vi.fn(),
     },
@@ -39,15 +39,16 @@ vi.mock('../middleware/auth.js', () => ({
   },
 }));
 
-vi.mock('../services/realclaw-executor.js', () => ({
-  isRealClawConfigured: () => mockIsRealClawConfigured(),
+vi.mock('../lib/chains.js', () => ({
+  MANTLE_NETWORK: 'testnet',
+  isMantleDexConfigured: () => mockIsMantleDexConfigured(),
 }));
 
 let app: ReturnType<typeof Fastify>;
 
 beforeEach(async () => {
   mockGetBalance.mockReset();
-  mockIsRealClawConfigured.mockReset();
+  mockIsMantleDexConfigured.mockReset();
   mockSupabaseClient.from.mockReset();
 
   app = Fastify();
@@ -111,8 +112,8 @@ describe('GET /api/user/balance', () => {
 });
 
 describe('GET /api/system/status', () => {
-  it('returns realClawConfigured true when RealClaw is configured', async () => {
-    mockIsRealClawConfigured.mockReturnValue(true);
+  it('returns dexConfigured true when the Mantle DEX is configured', async () => {
+    mockIsMantleDexConfigured.mockReturnValue(true);
 
     const res = await app.inject({
       method: 'GET',
@@ -121,13 +122,13 @@ describe('GET /api/system/status', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      realClawConfigured: true,
+      dexConfigured: true,
       network: 'testnet',
     });
   });
 
-  it('returns realClawConfigured false when RealClaw is not configured', async () => {
-    mockIsRealClawConfigured.mockReturnValue(false);
+  it('returns dexConfigured false when the Mantle DEX is not configured', async () => {
+    mockIsMantleDexConfigured.mockReturnValue(false);
 
     const res = await app.inject({
       method: 'GET',
@@ -136,7 +137,7 @@ describe('GET /api/system/status', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      realClawConfigured: false,
+      dexConfigured: false,
       network: 'testnet',
     });
   });

@@ -97,6 +97,45 @@ export function getMantleWmnt(): MantleTokenConfig {
   };
 }
 
+export function getMantleTokenBySymbol(symbol: string): MantleTokenConfig | null {
+  switch (symbol.toUpperCase()) {
+    case 'USDC':
+      return getMantleUsdc();
+    case 'USDT':
+      return getMantleUsdt();
+    case 'WMNT':
+      return getMantleWmnt();
+    default:
+      return null;
+  }
+}
+
+export function findMantleTokenByAddress(address: string): MantleTokenConfig | null {
+  const normalized = address.toLowerCase();
+
+  for (const token of [getMantleUsdc(), getMantleUsdt(), getMantleWmnt()]) {
+    if (token.address.toLowerCase() === normalized) {
+      return token;
+    }
+  }
+
+  return null;
+}
+
+export function getMantleDexRouterAddress(): `0x${string}` {
+  return requireTokenAddress('MANTLE_DEX_ROUTER_ADDRESS', 'Mantle UniswapV2Router02');
+}
+
+export function getMantleDexFactoryAddress(): `0x${string}` {
+  return requireTokenAddress('MANTLE_DEX_FACTORY_ADDRESS', 'Mantle UniswapV2Factory');
+}
+
+export function isMantleDexConfigured(): boolean {
+  return Boolean(
+    process.env.MANTLE_DEX_ROUTER_ADDRESS && process.env.MANTLE_DEX_FACTORY_ADDRESS,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // ERC-8004 registries on Mantle Testnet (chainId 5001).
 // ---------------------------------------------------------------------------
