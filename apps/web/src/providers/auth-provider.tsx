@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useActiveAccount, useActiveWalletConnectionStatus } from 'thirdweb/react';
+import { useAccount } from 'wagmi';
 import { toast } from 'sonner';
 import { checkSession, logout as logoutFn, type AuthMeResponse } from '@/lib/auth';
 import { getToken, clearToken, onTokenCleared } from '@/lib/token-store';
@@ -24,8 +24,7 @@ const AUTH_CHANNEL = 'mantleagents-auth';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const activeAccount = useActiveAccount();
-  const walletStatus = useActiveWalletConnectionStatus();
+  const { address: activeAddress, status: walletStatus } = useAccount();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
@@ -73,26 +72,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     new BroadcastChannel(AUTH_CHANNEL).postMessage({ type: 'logout' });
   }, [resetState]);
 
-  // Wait for thirdweb wallet status to settle before checking session.
-  // "connecting" = auto-connect in progress; "unknown" = not yet determined (e.g. on refresh).
+  // Wait for the wagmi wallet status to settle before checking session.
+  // "connecting"/"reconnecting" = wagmi auto-reconnect in progress (e.g. on refresh).
   // Once it resolves to "connected" or "disconnected" we know the wallet state.
   useEffect(() => {
-    if (walletStatus === 'connecting' || walletStatus === 'unknown') return; // still resolving
+    if (walletStatus === 'connecting' || walletStatus === 'reconnecting') return; // still resolving
     if (sessionChecked.current) return; // already ran
     sessionChecked.current = true;
 
     const token = getToken();
-    if (token && activeAccount) {
+    if (token && activeAddress) {
       // Wallet connected + JWT exists — validate the session
       refreshSession().finally(() => setIsLoading(false));
     } else {
       // No wallet or no token — clear any stale JWT
-      if (token && !activeAccount) {
+      if (token && !activeAddress) {
         clearToken();
       }
       setIsLoading(false);
     }
-  }, [walletStatus, activeAccount, refreshSession]);
+  }, [walletStatus, activeAddress, refreshSession]);
 
   // Listen for 401-triggered token clears
   useEffect(() => {
@@ -115,7 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => channel.close();
   }, [resetState, refreshSession]);
 
-  // Sync with thirdweb wallet state: if the wallet disconnects after being
+  // Sync with wagmi wallet state: if the wallet disconnects after being
   // connected, clear the auth state. Debounce to avoid spurious logouts during
   // transient disconnects (reconnect, network switch, extension refresh).
   const hadAccount = useRef(false);
@@ -123,7 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const DISCONNECT_DEBOUNCE_MS = 2500;
 
   useEffect(() => {
-    if (activeAccount) {
+    if (activeAddress) {
       hadAccount.current = true;
       if (disconnectTimerRef.current) {
         clearTimeout(disconnectTimerRef.current);
@@ -143,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearTimeout(disconnectTimerRef.current);
       }
     };
-  }, [activeAccount, isAuthenticated, walletStatus, resetState]);
+  }, [activeAddress, isAuthenticated, walletStatus, resetState]);
 
   return (
     <AuthContext.Provider

@@ -1,11 +1,7 @@
 'use client';
 
 import { type ComponentProps, type ReactNode } from 'react';
-import { useConnectModal } from 'thirdweb/react';
-import { bsc } from 'thirdweb/chains';
-import { client, wallets } from '@/lib/thirdweb';
-import { generatePayload, login, checkSession } from '@/lib/auth';
-import { useAuth } from '@/providers/auth-provider';
+import { useSiweAuth } from '@/hooks/use-siwe-auth';
 import { Button } from '@/components/ui/button';
 
 interface ConnectCTAProps extends Omit<ComponentProps<typeof Button>, 'onClick'> {
@@ -13,49 +9,22 @@ interface ConnectCTAProps extends Omit<ComponentProps<typeof Button>, 'onClick'>
 }
 
 export function ConnectCTA({ children, ...buttonProps }: ConnectCTAProps) {
-  const { connect } = useConnectModal();
-  const { handleLogin } = useAuth();
+  const { connectors, signIn, isPending } = useSiweAuth();
 
   const handleClick = async () => {
-    if (!client) return;
-
-    await connect({
-      client,
-      wallets,
-      chain: bsc,
-      size: 'compact',
-      auth: {
-        getLoginPayload: async ({ address }) => {
-          const payload = await generatePayload({ address });
-          return payload as any;
-        },
-        doLogin: async (params) => {
-          const jwt = await login({
-            payload: params.payload,
-            signature: params.signature,
-          });
-          const address =
-            typeof params.payload === 'object' &&
-            params.payload !== null &&
-            'address' in params.payload
-              ? (params.payload as { address: string }).address
-              : '';
-          await handleLogin(jwt, address);
-        },
-        isLoggedIn: async () => {
-          const session = await checkSession();
-          return !!session;
-        },
-        doLogout: async () => {},
-      },
-    });
+    // Prefer the injected (MetaMask) connector for the marketing CTA; fall back
+    // to whatever connector is available first.
+    const connector =
+      connectors.find((c) => c.type === 'injected') ?? connectors[0];
+    if (!connector) return;
+    await signIn(connector);
   };
 
   return (
     <Button
-      onClick={handleClick}
       {...buttonProps}
-      className={buttonProps.className}
+      onClick={handleClick}
+      disabled={isPending || buttonProps.disabled}
     >
       {children}
     </Button>

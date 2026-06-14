@@ -1,6 +1,6 @@
 // TODO: implement multi-chain logic — entire script depends on IdentityRegistry
 // Was using identityRegistryAbi, IDENTITY_REGISTRY_ADDRESS from @mantleagents/mantle-data,
-// chain client, and thirdweb wallet for on-chain URI migration.
+// chain client, and the relayer wallet for on-chain URI migration.
 
 async function main() {
   console.error('[8004-uri-migrate] Script not yet implemented for multi-chain');

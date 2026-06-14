@@ -123,7 +123,7 @@ graph TB
 | Mantle Execution | RealClaw / Byreal Skills CLI |
 | Market Data | `@mantleagents/mantle-data` SDK + Merkl (yield) |
 | Database | Supabase (PostgreSQL + Row Level Security) |
-| Auth | SIWE (Sign-In With Ethereum) + JWT via thirdweb |
+| Auth | SIWE (Sign-In With Ethereum, `siwe`) + JWT (`jose`); wallet connect via wagmi |
 | Monorepo | pnpm workspaces + Turborepo |
 | Testing | Vitest |
 
@@ -165,7 +165,7 @@ The API server runs on `http://localhost:4000` and the web app on `http://localh
 
 ### Roadmap: Account Abstraction / Gasless UX
 
-MantleAgents is currently non-custodial via Privy/RealClaw for trading execution: the platform routes actions through the agent execution layer and never stores raw user private keys. Account Abstraction is planned, not yet implemented. The intended extension is to use thirdweb smart accounts with a Mantle paymaster for non-trading actions such as publishing strategies, updating guardrails, and committing configuration changes, so users can complete routine agent-management actions without manually holding gas for every update.
+MantleAgents is currently non-custodial via Privy/RealClaw for trading execution: the platform routes actions through the agent execution layer and never stores raw user private keys. On-chain execution-layer transactions (ERC-8004 registration, attestations, swaps, yield) are broadcast by a single self-hosted relayer wallet (`EVM_SIGNER_PRIVATE_KEY`) that pays their gas. Account Abstraction is planned, not yet implemented. The intended extension is to add a Mantle paymaster for non-trading actions such as publishing strategies, updating guardrails, and committing configuration changes, so users can complete routine agent-management actions without manually holding gas for every update.
 
 ### Deploying / Re-deploying Contracts
 
@@ -202,7 +202,8 @@ pnpm --filter @mantleagents/contracts verify:registries             # sanity-che
 
 | Variable | Description |
 |---|---|
-| `THIRDWEB_SECRET_KEY` / `THIRDWEB_ADMIN_PRIVATE_KEY` | thirdweb auth + server wallets |
+| `AUTH_DOMAIN` / `JWT_SECRET` | SIWE domain binding + JWT signing secret (HS256) |
+| `EVM_SIGNER_PRIVATE_KEY` | Relayer wallet — signs/broadcasts all on-chain execution txs and pays gas (must be funded with MNT) |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Database |
 | `MARKETDATA_API_KEY` | Market data SDK auth key (`@mantleagents/mantle-data`, AVE Cloud-backed — non-Mantle chains) |
 | `MARKETDATA_DEFAULT_CHAIN` | Default chain for non-Mantle price queries (`bsc`, `eth`, `solana`, `base`) |

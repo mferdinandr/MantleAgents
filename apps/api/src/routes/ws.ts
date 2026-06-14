@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { thirdwebAuth } from '../lib/thirdweb.js';
+import { verifyJwt } from '../lib/auth.js';
 import { agentEvents, type ProgressEvent } from '../services/agent-events.js';
 
 export async function wsRoutes(app: FastifyInstance) {
@@ -22,8 +22,8 @@ export async function wsRoutes(app: FastifyInstance) {
 
         // Handle auth message
         if (msg.type === 'auth' && typeof msg.token === 'string') {
-          const result = await thirdwebAuth.verifyJWT({ jwt: msg.token });
-          if (!result.valid) {
+          const result = await verifyJwt(msg.token);
+          if (!result.valid || !result.sub) {
             socket.send(JSON.stringify({ type: 'error', message: 'Invalid token' }));
             socket.close();
             return;
@@ -33,7 +33,7 @@ export async function wsRoutes(app: FastifyInstance) {
           // register a listener that can never be cleaned up.
           if (closed) return;
 
-          walletAddress = result.parsedJWT.sub;
+          walletAddress = result.sub;
           clearTimeout(authTimeout);
 
           // Subscribe to progress events for this wallet

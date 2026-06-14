@@ -8,7 +8,7 @@ import {
 } from 'viem';
 import { bsc } from 'viem/chains';
 import type { YieldExecutionResult } from '@mantleagents/shared';
-import { sendTransactionFromServerWallet } from '../lib/thirdweb-wallet.js';
+import { sendRelayerTransaction } from '../lib/relayer.js';
 
 const yieldPublicClient = createPublicClient({ chain: bsc, transport: http() });
 
@@ -157,8 +157,8 @@ const STABLE_PRICE: Record<string, number> = {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Approve token spend — transaction sent from agent wallet (serverWalletAddress)
- * via Thirdweb sponsored tx. Gas paid by Thirdweb paymaster.
+ * Approve token spend — broadcast through the relayer wallet, which signs and
+ * pays gas.
  */
 async function approveToken(
   serverWalletAddress: string,
@@ -167,7 +167,7 @@ async function approveToken(
   amount: bigint,
 ): Promise<void> {
   const data = encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [spender, amount] });
-  const txHash = await sendTransactionFromServerWallet(serverWalletAddress, { to: tokenAddress, data });
+  const txHash = await sendRelayerTransaction({ to: tokenAddress, data });
   await yieldPublicClient.waitForTransactionReceipt({ hash: txHash });
   console.log(`[yield-executor] Approved ${tokenAddress}: ${txHash}`);
 }
@@ -180,8 +180,8 @@ function floorTick(tick: number, spacing: number): number {
 // ─── PancakeSwap V3 (CLAMM) single-sided deposit ─────────────────────────────
 
 /**
- * Deposit into a PancakeSwap V3 pool from the agent wallet (serverWalletAddress = 0xf737...).
- * Gas is sponsored by Thirdweb paymaster (0xBBA5... funds the billing).
+ * Deposit into a PancakeSwap V3 pool. Transactions are broadcast through the
+ * relayer wallet, which signs and pays gas.
  * Single-sided out-of-range position: only one token (USDT/USDC) is consumed.
  */
 async function executeCLAMMDeposit(params: {
@@ -286,7 +286,7 @@ async function executeCLAMMDeposit(params: {
     }],
   });
 
-  const mintTx = await sendTransactionFromServerWallet(serverWalletAddress, {
+  const mintTx = await sendRelayerTransaction({
     to: PANCAKE_NFPM_ADDRESS,
     data: mintData,
   });
@@ -361,7 +361,7 @@ export async function executeYieldDeposit(params: {
     abi: ICHI_VAULT_ABI, functionName: 'deposit',
     args: [isToken0 ? actualAmount : 0n, isToken0 ? 0n : actualAmount, walletAddr],
   });
-  const depositTx = await sendTransactionFromServerWallet(serverWalletAddress, { to: vaultAddress, data: depositData });
+  const depositTx = await sendRelayerTransaction({ to: vaultAddress, data: depositData });
   const receipt = await yieldPublicClient.waitForTransactionReceipt({ hash: depositTx });
 
   if (receipt.status !== 'success') {
@@ -391,7 +391,7 @@ export async function executeYieldWithdraw(params: {
   const withdrawData = encodeFunctionData({
     abi: ICHI_VAULT_ABI, functionName: 'withdraw', args: [shares, walletAddr],
   });
-  const txHash = await sendTransactionFromServerWallet(serverWalletAddress, { to: vaultAddress, data: withdrawData });
+  const txHash = await sendRelayerTransaction({ to: vaultAddress, data: withdrawData });
   const receipt = await yieldPublicClient.waitForTransactionReceipt({ hash: txHash });
 
   if (receipt.status !== 'success') {
