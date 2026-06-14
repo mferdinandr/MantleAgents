@@ -8,7 +8,7 @@ const cspHeader = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self'",
-  "connect-src 'self' https: wss:",
+  `connect-src 'self' https: wss: ${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'}`,
   `frame-src 'self' ${n8nBaseUrl}`,
   "frame-ancestors 'none'",
 ].join('; ');
