@@ -22,8 +22,8 @@ export function AuthGuard({ children, requireOnboarded = true }: AuthGuardProps)
       return;
     }
 
-    if (requireOnboarded && isOnboarded === false && pathname !== '/overview') {
-      router.replace('/overview');
+    if (requireOnboarded && isOnboarded === false && pathname !== '/onboarding') {
+      router.replace('/onboarding');
     }
   }, [isAuthenticated, isLoading, isOnboarded, requireOnboarded, router, pathname]);
 
@@ -35,7 +35,7 @@ export function AuthGuard({ children, requireOnboarded = true }: AuthGuardProps)
     );
   }
   if (!isAuthenticated) return null;
-  if (requireOnboarded && !isOnboarded && pathname !== '/overview') return null;
+  if (requireOnboarded && !isOnboarded && pathname !== '/onboarding') return null;
 
   return <>{children}</>;
 }
