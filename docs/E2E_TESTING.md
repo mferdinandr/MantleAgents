@@ -1,6 +1,7 @@
 # End-to-End Testing Guide
 
 Pastikan sebelum mulai:
+
 - `pnpm dev` sudah jalan (API :4000, Web :3000)
 - `docker compose up n8n` sudah jalan (:5678)
 - Wallet Metamask/Rabby terinstall di browser, sudah switch ke **Mantle Sepolia Testnet** (chainId 5003)
@@ -11,12 +12,12 @@ Pastikan sebelum mulai:
 
 **URL**: http://localhost:3000
 
-- [ ] Buka homepage, pastikan landing page muncul
-- [ ] Klik Connect Wallet → pilih wallet → approve di browser extension
-- [ ] Redirect ke `/onboarding` setelah connect
-- [ ] Step 1 (Connect Wallet) otomatis ter-centang
-- [ ] Step 2 (Fund) — cek apakah ada link faucet Mantle Sepolia; fund wallet jika perlu di https://faucet.mantle.xyz
-- [ ] Step 3 (Register Agent) — klik Register, approve transaksi di wallet
+- [x] Buka homepage, pastikan landing page muncul
+- [x] Klik Connect Wallet → pilih wallet → approve di browser extension
+- [x] Redirect ke `/onboarding` setelah connect
+- [x] Step 1 (Connect Wallet) otomatis ter-centang
+- [x] Step 2 (Fund) — cek apakah ada link faucet Mantle Sepolia; fund wallet jika perlu di https://faucet.mantle.xyz
+- [x] Step 3 (Register Agent) — klik Register, approve transaksi di wallet
 - [ ] Setelah register, muncul `agentId` (ERC-8004 token ID)
 - [ ] Redirect ke `/overview` setelah onboarding selesai
 
