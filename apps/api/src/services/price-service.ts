@@ -1,24 +1,25 @@
-import {
-  MantleDataClient,
-  type Chain,
-  type TokenDetail,
-  getTokenDetail,
-  batchTokenPrices,
-} from '@mantleagents/mantle-data';
-
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
 const PRICE_CACHE_TTL_MS = 60_000; // 1 minute
 
-let _aveClient: MantleDataClient | undefined;
+let _warnedMissingKey = false;
 
-function getMantleDataClient(): MantleDataClient {
-  if (!_aveClient) {
-    _aveClient = new MantleDataClient();
+function getCoinGeckoClient(): { baseUrl: string; authHeader: Record<string, string> } | null {
+  const key = process.env.COINGECKO_API_KEY ?? '';
+  if (!key) {
+    if (!_warnedMissingKey) {
+      console.warn('[price-service] COINGECKO_API_KEY is not set — price fetches will return null');
+      _warnedMissingKey = true;
+    }
+    return null;
   }
-  return _aveClient;
+  const isPro = !key.startsWith('CG-');
+  return {
+    baseUrl: isPro ? 'https://pro-api.coingecko.com/api/v3' : 'https://api.coingecko.com/api/v3',
+    authHeader: { [isPro ? 'x-cg-pro-api-key' : 'x-cg-demo-api-key']: key },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -26,15 +27,14 @@ function getMantleDataClient(): MantleDataClient {
 // ---------------------------------------------------------------------------
 
 interface CachedPrice {
-  price: number;
-  detail?: TokenDetail;
+  price: number | null;
   fetchedAt: number;
 }
 
 const priceCache = new Map<string, CachedPrice>();
 
-function cacheKey(chain: Chain, address: string): string {
-  return `${address.toLowerCase()}-${chain}`;
+function cacheKey(address: string): string {
+  return address.toLowerCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -42,87 +42,57 @@ function cacheKey(chain: Chain, address: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Get current price for a single token via AVE Data REST.
- * Returns USD price. Results are cached for 1 minute.
+ * Get current price for a single token via CoinGecko.
+ * Returns USD price or null if not found. Results cached for 1 minute.
  */
 export async function getTokenPrice(
-  chain: Chain,
+  _chain: string,
   address: string,
-): Promise<number> {
-  const key = cacheKey(chain, address);
+): Promise<number | null> {
+  const key = cacheKey(address);
   const cached = priceCache.get(key);
   if (cached && Date.now() - cached.fetchedAt < PRICE_CACHE_TTL_MS) {
     return cached.price;
   }
 
-  const client = getMantleDataClient();
-  const detail = await getTokenDetail(client, chain, address);
-  const price = detail?.price ?? 0;
-
-  priceCache.set(key, { price, detail, fetchedAt: Date.now() });
+  const result = await fetchBatchPrices([address]);
+  const price = result.get(address.toLowerCase()) ?? null;
   return price;
 }
 
 /**
- * Get full token detail (price, market cap, volume, holder count, etc.)
- */
-export async function getTokenPriceDetail(
-  chain: Chain,
-  address: string,
-): Promise<TokenDetail | null> {
-  const key = cacheKey(chain, address);
-  const cached = priceCache.get(key);
-  if (
-    cached?.detail &&
-    Date.now() - cached.fetchedAt < PRICE_CACHE_TTL_MS
-  ) {
-    return cached.detail;
-  }
-
-  const client = getMantleDataClient();
-  try {
-    const detail = await getTokenDetail(client, chain, address);
-    priceCache.set(key, {
-      price: detail?.price ?? 0,
-      detail,
-      fetchedAt: Date.now(),
-    });
-    return detail;
-  } catch (err) {
-    console.warn(`[price-service] Failed to fetch detail for ${address} on ${chain}:`, err);
-    return cached?.detail ?? null;
-  }
-}
-
-/**
- * Batch fetch prices for multiple tokens.
- * tokenIds format: "address-chain" (e.g. "0xabc...-bsc")
+ * Batch fetch prices for multiple token contract addresses on Mantle.
+ * Returns a Map of lowercase address → USD price.
  */
 export async function fetchBatchPrices(
-  tokenIds: string[],
+  tokenAddresses: string[],
 ): Promise<Map<string, number>> {
-  const client = getMantleDataClient();
   const prices = new Map<string, number>();
 
-  if (tokenIds.length === 0) return prices;
+  if (tokenAddresses.length === 0) return prices;
+
+  const client = getCoinGeckoClient();
+  if (!client) return prices;
+
+  const { baseUrl, authHeader } = client;
+  const csv = tokenAddresses.map((a) => a.toLowerCase()).join(',');
+  const url = `${baseUrl}/simple/token_price/mantle?contract_addresses=${csv}&vs_currencies=usd`;
 
   try {
-    const result = await batchTokenPrices(client, { token_ids: tokenIds });
+    const res = await fetch(url, { headers: { ...authHeader, Accept: 'application/json' } });
+    if (!res.ok) {
+      console.warn(`[price-service] CoinGecko batch fetch failed: ${res.status} ${res.statusText}`);
+      return prices;
+    }
+    const data = (await res.json()) as Record<string, { usd?: number }>;
 
-    for (const [id, detail] of Object.entries(result)) {
-      const price = (detail as any)?.price ?? 0;
-      prices.set(id, price);
-
-      // Also populate the single-token cache
-      const parts = id.split('-');
-      if (parts.length >= 2) {
-        const chain = parts[parts.length - 1] as Chain;
-        const address = parts.slice(0, -1).join('-');
-        priceCache.set(cacheKey(chain, address), {
-          price,
-          fetchedAt: Date.now(),
-        });
+    const now = Date.now();
+    for (const [addr, val] of Object.entries(data)) {
+      const price = val?.usd ?? null;
+      if (price !== null) {
+        prices.set(addr.toLowerCase(), price);
       }
+      priceCache.set(cacheKey(addr), { price, fetchedAt: now });
     }
   } catch (err) {
     console.warn('[price-service] Batch price fetch failed:', err);
@@ -132,45 +102,29 @@ export async function fetchBatchPrices(
 }
 
 /**
- * Fetch all prices for a list of token addresses on a given chain.
+ * Fetch all prices for a list of tokens.
  * Returns a Map of symbol → USD price.
  *
- * This is the main interface consumed by market-data-service and snapshot-cron.
+ * Consumed by market-data-service and snapshot-cron.
  */
 export async function fetchAllPrices(
-  tokens: Array<{ symbol: string; address: string; chain: Chain }>,
+  tokens: Array<{ symbol: string; address: string; chain: string }>,
 ): Promise<Map<string, number>> {
   const prices = new Map<string, number>();
 
   if (tokens.length === 0) return prices;
 
-  // Build batch request
-  const tokenIds = tokens.map((t) => `${t.address.toLowerCase()}-${t.chain}`);
+  const addresses = tokens.map((t) => t.address.toLowerCase());
 
   try {
-    const batchResult = await fetchBatchPrices(tokenIds);
+    const batchResult = await fetchBatchPrices(addresses);
 
     for (const token of tokens) {
-      const id = `${token.address.toLowerCase()}-${token.chain}`;
-      const price = batchResult.get(id) ?? 0;
+      const price = batchResult.get(token.address.toLowerCase()) ?? 0;
       prices.set(token.symbol, price);
     }
   } catch (err) {
-    console.warn('[price-service] fetchAllPrices failed, falling back to individual fetches:', err);
-
-    // Fallback: fetch individually
-    const results = await Promise.allSettled(
-      tokens.map(async (t) => {
-        const price = await getTokenPrice(t.chain, t.address);
-        return { symbol: t.symbol, price };
-      }),
-    );
-
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        prices.set(result.value.symbol, result.value.price);
-      }
-    }
+    console.warn('[price-service] fetchAllPrices failed:', err);
   }
 
   return prices;

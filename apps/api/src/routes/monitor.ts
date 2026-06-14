@@ -29,10 +29,10 @@ export async function monitorRoutes(app: FastifyInstance) {
         items.map(async (item) => {
           let currentPrice = 0;
           try {
-            currentPrice = await getTokenPrice(
+            currentPrice = (await getTokenPrice(
               item.chain as Chain,
               item.token_address,
-            );
+            )) ?? 0;
           } catch {
             // price fetch failed — return 0
           }

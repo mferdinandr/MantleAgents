@@ -218,7 +218,7 @@ async function pollPricesAndCheckAlerts(): Promise<void> {
     async ([key, token]) => {
       try {
         const price = await getTokenPrice(token.chain, token.address);
-        prices.set(key, price);
+        prices.set(key, price ?? 0);
       } catch {
         // Skip failed price fetches
       }
