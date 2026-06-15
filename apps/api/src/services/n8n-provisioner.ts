@@ -33,11 +33,20 @@ export async function provisionUserWorkflow(walletAddress: string): Promise<{
 }> {
   const n8nBaseUrl = process.env.N8N_BASE_URL ?? 'http://localhost:5678';
   const n8nApiKey = process.env.N8N_API_KEY ?? null;
+  const n8nUser = process.env.N8N_BASIC_AUTH_USER ?? null;
+  const n8nPass = process.env.N8N_BASIC_AUTH_PASSWORD ?? null;
   const token = generateN8nToken(walletAddress);
 
-  if (!n8nApiKey) {
+  const hasApiKey = !!n8nApiKey;
+  const hasBasicAuth = !!(n8nUser && n8nPass);
+
+  if (!hasApiKey && !hasBasicAuth) {
     return { workflowId: null, n8nBaseUrl, token, configured: false };
   }
+
+  const authHeader = hasApiKey
+    ? { 'X-N8N-API-KEY': n8nApiKey! }
+    : { Authorization: `Basic ${Buffer.from(`${n8nUser}:${n8nPass}`).toString('base64')}` };
 
   const { data: profile, error: profileError } = await supabaseAdmin
     .from('user_profiles' as any)
@@ -56,15 +65,22 @@ export async function provisionUserWorkflow(walletAddress: string): Promise<{
 
   const templateRaw = await readFile(TEMPLATE_PATH, 'utf-8');
   const template = JSON.parse(templateRaw) as Record<string, unknown>;
-  template.name = workflowNameFor(walletAddress);
+
+  // n8n API only accepts name/nodes/connections/settings on creation
+  const payload = {
+    name: workflowNameFor(walletAddress),
+    nodes: template.nodes,
+    connections: template.connections,
+    settings: template.settings ?? {},
+  };
 
   const response = await fetch(`${n8nBaseUrl}/api/v1/workflows`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-N8N-API-KEY': n8nApiKey,
+      ...authHeader,
     },
-    body: JSON.stringify(template),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {

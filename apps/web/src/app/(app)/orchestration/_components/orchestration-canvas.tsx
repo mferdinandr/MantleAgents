@@ -15,17 +15,12 @@ type ProvisionResponse = {
 
 export function OrchestrationCanvas() {
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
-  const [iframeKey, setIframeKey] = React.useState(0);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['n8n-provision'],
     queryFn: () => api.get<ProvisionResponse>('/api/n8n/provision'),
     staleTime: 4 * 60 * 1000,
   });
-
-  function handleDeploy() {
-    setIframeKey((k) => k + 1);
-  }
 
   if (isLoading) {
     return (
@@ -63,8 +58,8 @@ export function OrchestrationCanvas() {
   }
 
   const iframeUrl = data.workflowId
-    ? `${data.n8nBaseUrl}/workflow/${data.workflowId}?token=${data.token}`
-    : `${data.n8nBaseUrl}?token=${data.token}`;
+    ? `/api/n8n-embed?path=/workflow/${data.workflowId}`
+    : `/api/n8n-embed?path=/`;
 
   const openUrl = data.workflowId
     ? `${data.n8nBaseUrl}/workflow/${data.workflowId}`
@@ -90,11 +85,10 @@ export function OrchestrationCanvas() {
         </a>
       </div>
 
-      <WorkflowGenerator onDeploy={handleDeploy} />
+      <WorkflowGenerator onDeploy={() => {}} />
 
       <div className="overflow-hidden rounded-lg border-2 border-gb-deep/30 bg-gb-mid/20">
         <iframe
-          key={iframeKey}
           ref={iframeRef}
           src={iframeUrl}
           title="n8n Orchestration Canvas"

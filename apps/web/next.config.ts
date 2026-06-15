@@ -19,9 +19,18 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        source: '/((?!orchestration).*)',
+        source: '/((?!orchestration|api/n8n-embed).*)',
         headers: [{ key: 'Content-Security-Policy', value: cspHeader }],
       },
+    ];
+  },
+  async rewrites() {
+    // Proxy n8n assets/API through Next.js so the iframe stays same-origin
+    return [
+{ source: '/assets/:path*', destination: `${n8nBaseUrl}/assets/:path*` },
+      { source: '/static/:path*', destination: `${n8nBaseUrl}/static/:path*` },
+      { source: '/favicon.ico', destination: `${n8nBaseUrl}/favicon.ico` },
+      { source: '/types/:path*', destination: `${n8nBaseUrl}/types/:path*` },
     ];
   },
   async redirects() {

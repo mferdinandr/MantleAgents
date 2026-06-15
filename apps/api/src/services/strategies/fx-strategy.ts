@@ -50,9 +50,6 @@ export class FxStrategy implements AgentStrategy {
   ): Promise<StrategyAnalysisResult> {
     const { news, currencies } = data as FxData;
 
-    if (news.length === 0) {
-      return { signals: [], summary: 'No news articles found', sourcesUsed: 0 };
-    }
 
     const rawAllowed = (config.allowed_currencies ?? []) as string[];
     const allowedCurrencies =

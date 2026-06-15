@@ -30,6 +30,10 @@ services:
       N8N_PORT: 5678
       N8N_PROTOCOL: http
       API_BASE_URL: ${API_BASE_URL:-http://api:4000}
+      N8N_SKIP_WEBHOOK_DEREGISTRATION_SHUTDOWN: 'true'
+      N8N_USER_MANAGEMENT_DISABLED: 'true'
+      N8N_DIAGNOSTICS_ENABLED: 'false'
+      N8N_HIRING_BANNER_ENABLED: 'false'
     volumes:
       - n8n_data:/home/node/.n8n
     networks:

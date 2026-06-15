@@ -1,9 +1,10 @@
-import { OrchestrationCanvas } from './_components/orchestration-canvas';
+import { notFound } from 'next/navigation';
 
 export const metadata = {
   title: 'Orchestration Canvas | MantleAgents',
 };
 
 export default function OrchestrationPage() {
-  return <OrchestrationCanvas />;
+  // Temporarily hidden — n8n embed in progress
+  notFound();
 }
