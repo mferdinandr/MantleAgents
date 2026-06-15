@@ -1,0 +1,6 @@
+{
+  "installCommand": "cd ../.. && npm install -g pnpm@latest && pnpm install",
+  "buildCommand": "cd ../.. && pnpm --filter @mantleagents/web build",
+  "outputDirectory": ".next",
+  "framework": "nextjs"
+}
