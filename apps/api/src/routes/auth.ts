@@ -71,6 +71,22 @@ export async function authRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: 'Failed to fetch user profile' });
       }
 
+      // Auto-complete onboarding if user already has agent configs (handles DB resets / missed flags)
+      if (!data.onboarding_completed) {
+        const { count } = await supabaseAdmin
+          .from('agent_configs')
+          .select('*', { count: 'exact', head: true })
+          .eq('wallet_address', walletAddress);
+
+        if (count && count > 0) {
+          await supabaseAdmin
+            .from('user_profiles')
+            .update({ onboarding_completed: true })
+            .eq('wallet_address', walletAddress);
+          data.onboarding_completed = true;
+        }
+      }
+
       return data;
     },
   );

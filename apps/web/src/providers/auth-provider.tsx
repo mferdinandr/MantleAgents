@@ -81,14 +81,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionChecked.current = true;
 
     const token = getToken();
-    if (token && activeAddress) {
-      // Wallet connected + JWT exists — validate the session
+    if (token) {
+      // JWT exists — validate with server regardless of wallet connection state.
+      // If invalid, server returns 401 which triggers clearToken via the 401 handler.
       refreshSession().finally(() => setIsLoading(false));
     } else {
-      // No wallet or no token — clear any stale JWT
-      if (token && !activeAddress) {
-        clearToken();
-      }
       setIsLoading(false);
     }
   }, [walletStatus, activeAddress, refreshSession]);
