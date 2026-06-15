@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "npm install -g pnpm && pnpm install",
-  "buildCommand": "pnpm --filter @mantleagents/web build",
+  "buildCommand": "npx turbo run build --filter=@mantleagents/web",
   "outputDirectory": "apps/web/.next",
   "framework": "nextjs"
 }
