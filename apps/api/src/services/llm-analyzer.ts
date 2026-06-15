@@ -84,50 +84,54 @@ export function buildSystemPrompt(params: {
     ? walletBalances.map(b => `  ${b.symbol}: ${b.formatted} (~$${b.valueUsd.toFixed(2)})`).join('\n')
     : '  Empty wallet';
 
-  // Calculate available buying power from base stables (USDC, USDT, USDm)
-  const baseStables = ['USDC', 'USDT', 'USDm'];
+  // Calculate available buying power from Mantle stablecoins
+  const baseStables = ['USDC', 'USDT'];
   const availableUsd = walletBalances
     ? walletBalances.filter(b => baseStables.includes(b.symbol)).reduce((sum, b) => sum + b.valueUsd, 0)
     : portfolioValueUsd;
 
   return [
-    'You are a macro crypto analyst for a BSC on-chain trading portfolio.',
-    'Your base currency is USDT (Binance-Peg USDT on BSC). Buys spend USDT.',
+    'You are an on-chain trading agent on Mantle blockchain (Mantle Sepolia testnet).',
+    'Your base stablecoins are USDC and USDT on Mantle. Buys spend USDT (or USDC).',
     `Your trading universe is limited to these tokens: ${allowedCurrencies.join(', ')}.`,
-    'These are real BSC mainnet tokens: BNB (Binance Coin), ETH (Binance-Peg ETH), BTC (Binance-Peg BTC), USDT, USDC.',
+    'Token roles: USDC and USDT are stablecoins (pegged to USD). WMNT is Wrapped MNT — the native Mantle token, analogous to WETH on Ethereum.',
+    'WMNT has real price exposure to Mantle network activity, MNT tokenomics, and broader L2/crypto sentiment.',
     '',
     '## Wallet State',
     `Total portfolio value: $${portfolioValueUsd.toFixed(2)}`,
-    `Available buying power (USDT): $${availableUsd.toFixed(2)}`,
+    `Available buying power (USDT/USDC): $${availableUsd.toFixed(2)}`,
     `On-chain balances:\n${balanceLines}`,
     `Tracked positions: ${positionsSummary}`,
     '',
     '## Strategy',
-    'Use macro news (USD strength/weakness, risk-on/risk-off sentiment, crypto market conditions) to decide:',
-    '- USD bearish / risk-on → buy BNB or ETH (reduce USD exposure)',
-    '- USD bullish / risk-off → sell BNB/ETH back to USDT',
-    '- BTC-specific news → consider BTC signals',
+    'Use macro crypto news and Mantle ecosystem signals to trade WMNT against stablecoins:',
+    '- Mantle bullish / risk-on / L2 adoption news → buy WMNT (spend USDT, acquire WMNT)',
+    '- Mantle bearish / risk-off / market downturn → sell WMNT back to USDT',
+    '- General crypto bullish sentiment benefits WMNT as a L2 native asset',
+    '- Stablecoin dominance / fear events → exit WMNT to USDT',
     '',
     '## Rules',
     'Generate trading signals based on the provided news articles.',
     'For each signal:',
-    '- currency: must be one of the allowed tokens (BNB, ETH, BTC, USDT, USDC)',
-    '- confidence: 0-100 (only signals >= 60 will be considered)',
+    '- currency: must be one of the allowed tokens — WMNT, USDC, or USDT',
+    '- confidence: 0-100 (only signals >= 60 will be considered for execution)',
     '- allocationPct: 0-100, what percentage of available buying power to use',
-    '- reasoning: must cite specific news articles or data points',
-    '- direction: buy (spend USDT to buy the token) or sell (convert back to USDT)',
+    '- reasoning: must cite specific news articles, market conditions, or data points',
+    '- direction: buy (spend USDT to acquire WMNT) or sell (swap WMNT back to USDT)',
     '- timeHorizon: short (hours), medium (days), long (weeks)',
     '',
     '## ALLOCATION GUIDELINES',
-    `- Available: $${availableUsd.toFixed(2)} USDT. Sum of allocationPct across all buy signals must not exceed 100%.`,
+    `- Available: $${availableUsd.toFixed(2)} in stablecoins. Sum of allocationPct across all buy signals must not exceed 100%.`,
     '- Scale with conviction: low (60-70) → 10-20%, medium (70-85) → 20-40%, high (85+) → 40-60%.',
-    '- For sells: allocationPct is the % of your held position to sell.',
+    '- For sells: allocationPct is the % of your held WMNT position to sell.',
+    '- Prefer small to medium allocations (10-30%) given testnet conditions.',
     '',
     '## CRITICAL CONSTRAINTS',
     '- You can only SELL tokens you actually hold. Check on-chain balances above.',
     '- Do NOT generate sell signals for tokens with zero balance.',
     '- Only generate signals for tokens in your allowed list.',
-    '- When buying, use BNB as default unless BTC or ETH has stronger specific catalysts.',
+    '- Primary tradeable asset is WMNT — this is the token you buy/sell against stablecoins.',
+    '- If no strong signal exists, return direction: "hold" rather than forcing a trade.',
     customPrompt ? `\nUser instructions: ${customPrompt}` : '',
   ].join('\n');
 }
@@ -141,7 +145,7 @@ export function buildAnalysisPrompt(params: { news: NewsArticle[] }): string {
     `[${i + 1}] ${n.title}\n    Source: ${n.source || n.url}\n    ${n.excerpt}`
   ).join('\n\n');
 
-  return `Analyze these ${params.news.length} FX news articles and generate trading signals:\n\n${articles}`;
+  return `Analyze these ${params.news.length} news articles and generate WMNT/stablecoin trading signals for Mantle:\n\n${articles}`;
 }
 
 /** Dedicated system prompt for overview FX analysis (Mantle stablecoins, no trade execution). */

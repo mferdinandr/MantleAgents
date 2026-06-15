@@ -1,5 +1,6 @@
 import type { FailureCategory, GuardrailCheck } from '@mantleagents/shared';
-import { STABLE_TOKENS, DEFAULT_GUARDRAILS, ALL_TOKEN_ADDRESSES, USDT_ADDRESS } from '@mantleagents/shared';
+import { DEFAULT_GUARDRAILS } from '@mantleagents/shared';
+import { getMantleUsdc, getMantleUsdt, getMantleWmnt, getMantleTokenBySymbol } from '../../lib/chains.js';
 import { fetchFxNews } from '../news-fetcher.js';
 import { analyzeFxNews } from '../llm-analyzer.js';
 import { executeTrade } from '../trade-executor.js';
@@ -13,6 +14,15 @@ import type {
   WalletContext,
   GuardrailContext,
 } from './types.js';
+
+// Tokens actually deployed on Mantle DEX — only these can be traded
+const MANTLE_FX_TOKENS = ['USDC', 'USDT', 'WMNT'] as const;
+
+function resolveMantleFxCurrencies(rawAllowed: string[]): string[] {
+  if (rawAllowed.length === 0 || rawAllowed.includes('ALL')) return [...MANTLE_FX_TOKENS];
+  // Filter to only tokens that exist on Mantle DEX
+  return rawAllowed.filter(t => MANTLE_FX_TOKENS.includes(t as any));
+}
 
 interface FxSignal {
   currency: string;
@@ -33,12 +43,7 @@ export class FxStrategy implements AgentStrategy {
 
   async fetchData(config: AgentConfigRow, _context: StrategyContext): Promise<FxData> {
     const rawAllowed = (config.allowed_currencies ?? []) as string[];
-    const allowedCurrencies =
-      rawAllowed.length === 0 || rawAllowed.includes('ALL')
-        ? STABLE_TOKENS.filter((t) => t !== 'USDm')
-        : rawAllowed;
-    const currencies = allowedCurrencies.length > 0 ? [...allowedCurrencies] : ['EURm', 'GBPm', 'JPYm'];
-
+    const currencies = resolveMantleFxCurrencies(rawAllowed);
     const news = await fetchFxNews(currencies);
     return { news, currencies };
   }
@@ -52,10 +57,7 @@ export class FxStrategy implements AgentStrategy {
 
 
     const rawAllowed = (config.allowed_currencies ?? []) as string[];
-    const allowedCurrencies =
-      rawAllowed.length === 0 || rawAllowed.includes('ALL')
-        ? STABLE_TOKENS.filter((t) => t !== 'USDm')
-        : rawAllowed;
+    const allowedCurrencies = resolveMantleFxCurrencies(rawAllowed);
 
     const result = await analyzeFxNews({
       news,
@@ -85,14 +87,15 @@ export class FxStrategy implements AgentStrategy {
   ): Promise<ExecutionResult> {
     const s = signal as FxSignal & { amountUsd: number };
 
-    const tokenAddress = ALL_TOKEN_ADDRESSES[s.currency];
-    if (!tokenAddress) {
-      return { success: false, amountUsd: 0, error: `Token ${s.currency} not found — add it to allowed_currencies` };
+    const tokenConfig = getMantleTokenBySymbol(s.currency);
+    if (!tokenConfig) {
+      return { success: false, amountUsd: 0, error: `Token ${s.currency} not available on Mantle DEX` };
     }
 
     // For buy: swap USDT → token; for sell: swap token → USDT
-    const inTokenAddress = s.direction === 'buy' ? USDT_ADDRESS : tokenAddress;
-    const outTokenAddress = s.direction === 'buy' ? tokenAddress : USDT_ADDRESS;
+    const usdtConfig = getMantleUsdt();
+    const inTokenAddress = s.direction === 'buy' ? usdtConfig.address : tokenConfig.address;
+    const outTokenAddress = s.direction === 'buy' ? tokenConfig.address : usdtConfig.address;
 
     const result = await executeTrade({
       serverWalletId: wallet.serverWalletId,
@@ -124,10 +127,7 @@ export class FxStrategy implements AgentStrategy {
     const s = signal as FxSignal & { amountUsd: number };
 
     const rawAllowed = (config.allowed_currencies ?? []) as string[];
-    const allowedCurrencies =
-      rawAllowed.length === 0 || rawAllowed.includes('ALL')
-        ? STABLE_TOKENS.filter((t) => t !== 'USDm')
-        : rawAllowed;
+    const allowedCurrencies = resolveMantleFxCurrencies(rawAllowed);
 
     const defaults = DEFAULT_GUARDRAILS.moderate;
     return checkGuardrails({
