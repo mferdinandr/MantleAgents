@@ -5,13 +5,20 @@ import { useConnect, useSignMessage, useAccount, type Connector } from 'wagmi';
 import { generatePayload, login } from '@/lib/auth';
 import { useAuth } from '@/providers/auth-provider';
 
+interface UseSiweAuthReturn {
+  connectors: readonly Connector[];
+  signIn: (connector: Connector) => Promise<void>;
+  isPending: boolean;
+  error: string | null;
+}
+
 interface SiwePayload {
   message: string;
   address: string;
   nonce: string;
 }
 
-export function useSiweAuth() {
+export function useSiweAuth(): UseSiweAuthReturn {
   const { connectors, connectAsync } = useConnect();
   const { signMessageAsync } = useSignMessage();
   const { handleLogin } = useAuth();
