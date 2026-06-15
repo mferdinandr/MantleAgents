@@ -78,7 +78,14 @@ export async function getCachedTrendingFx(): Promise<{
     .slice(0, 5)
     .map((t) => t.symbol);
 
-  const tokenNews = top5Symbols.length > 0 ? await fetchNewsForTokens(top5Symbols) : {};
+  let tokenNews: TokenNewsResult = {};
+  if (top5Symbols.length > 0) {
+    try {
+      tokenNews = await fetchNewsForTokens(top5Symbols);
+    } catch {
+      // News API unavailable (no key, insufficient credit, etc.)
+    }
+  }
 
   const now = new Date().toISOString();
   await supabaseAdmin

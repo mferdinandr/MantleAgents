@@ -91,14 +91,20 @@ async function fetchOneLinerForSymbol(symbol: string): Promise<string> {
       return oneLiner;
     } catch (err) {
       lastErr = err;
-      console.warn(`[token-news] Attempt ${attempt}/${MAX_RETRIES} failed for ${symbol}:`, err);
+      // 402/401 = billing or auth issue — no point retrying
+      const status = (err as { status?: number })?.status;
+      if (status === 402 || status === 401) {
+        console.warn(`[token-news] News API billing/auth error for ${symbol}, skipping retries`);
+        return '';
+      }
+      console.warn(`[token-news] Attempt ${attempt}/${MAX_RETRIES} failed for ${symbol}:`, (err as Error)?.message ?? err);
       if (attempt < MAX_RETRIES) {
         await sleep(RETRY_DELAY_MS * attempt);
       }
     }
   }
 
-  console.warn(`[token-news] All retries exhausted for ${symbol}:`, lastErr);
+  console.warn(`[token-news] All retries exhausted for ${symbol}:`, (lastErr as Error)?.message ?? lastErr);
   return '';
 }
 
@@ -111,7 +117,7 @@ export type TokenNewsResult = Record<string, string>;
 export async function fetchNewsForTokens(symbols: string[]): Promise<TokenNewsResult> {
   if (symbols.length === 0) return {};
 
-  const results = await Promise.all(
+  const settled = await Promise.allSettled(
     symbols.map(async (symbol) => {
       const oneLiner = await fetchOneLinerForSymbol(symbol);
       return { symbol, oneLiner };
@@ -119,8 +125,10 @@ export async function fetchNewsForTokens(symbols: string[]): Promise<TokenNewsRe
   );
 
   const out: TokenNewsResult = {};
-  for (const { symbol, oneLiner } of results) {
-    out[symbol] = oneLiner;
+  for (const result of settled) {
+    if (result.status === 'fulfilled') {
+      out[result.value.symbol] = result.value.oneLiner;
+    }
   }
   return out;
 }

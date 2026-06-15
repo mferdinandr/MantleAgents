@@ -70,7 +70,12 @@ export async function fetchFxNews(currencies: string[]): Promise<NewsArticle[]> 
         }
       }
     } catch (err) {
-      console.error(`News fetch failed for query "${query}":`, err);
+      const status = (err as { status?: number })?.status;
+      if (status === 402 || status === 401) {
+        console.warn('[news-fetcher] News API billing/auth error — skipping remaining queries');
+        break;
+      }
+      console.warn(`[news-fetcher] Query failed: "${query}":`, (err as Error)?.message ?? err);
     }
   }
 
